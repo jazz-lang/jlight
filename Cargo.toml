@@ -1,43 +1,16 @@
 [package]
 name = "jlight"
 version = "0.1.0"
-authors = ["gtash <adel.prokurov@protonmail.com>"]
+authors = ["playXE <adel.prokurov@protonmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-getopts = "^0.2"
-num_cpus = "^1.11"
-parking_lot = "^0.10"
 ahash = "0.3"
-time = "^0.2"
-num-integer = "^0.1"
-float-cmp = "^0.6"
-num-traits = "^0.2"
-dirs = "^2.0"
-
-crossbeam-deque = "^0.7"
-crossbeam-channel = "^0.4"
-libc = "^0.2"
-jemallocator = { version = "^0.3", optional = true }
-siphasher = "^0.3"
-rand = "^0.7"
-
-[dependencies.num-bigint]
-version = "^0.2"
-features = ["rand"]
-
-[dependencies.socket2]
-version = "^0.3.11"
-features = ["unix", "reuseport"]
-
-[target.'cfg(not(windows))'.dependencies]
-nix = "^0.16"
-
-[profile.release]
-opt-level = 3
-debug = false
-lto = true
-debug-assertions = false
-panic = "unwind"
+parking_lot = "0.10"
+crossbeam-deque = "0.7"
+crossbeam-channel = "0.4"
+mimalloc = "0.1"
+lazy_static = "1.4"
+num_cpus = "1.12"
