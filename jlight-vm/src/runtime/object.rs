@@ -51,8 +51,7 @@ pub struct Function {
     /// captured values from parent scope
     pub upvalues: Vec<ObjectPointer>,
     pub argc: i32,
-    /// function entry point
-    pub block: u16,
+    pub code: Vec<crate::bytecode::block::BasicBlock>,
     /// Native function pointer
     pub native: Option<extern "C" fn(&Runtime, ObjectPointer, &[ObjectPointer]) -> ObjectPointer>,
     pub module: Arc<Module>,
@@ -622,7 +621,7 @@ pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> ObjectPointer
         argc,
         upvalues: vec![],
         native: Some(fun),
-        block: 0,
+        code: vec![],
         module: Arc::new(Module::new()),
         name: Arc::new(String::new()),
     };

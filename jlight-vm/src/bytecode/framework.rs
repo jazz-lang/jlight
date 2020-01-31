@@ -70,7 +70,7 @@ impl BytecodeFunction {
         for block in self.blocks.iter() {
             let insns = &instructions[block.start.get() as usize..block.len as usize];
             basic_blocks.push(BasicBlock {
-                instructions: insns.iter().map(|x| **x).collect(),
+                instructions: insns.iter().map(|x| (**x).clone()).collect(),
             });
         }
         basic_blocks

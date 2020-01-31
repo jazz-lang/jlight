@@ -59,13 +59,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_top_level(&mut self) -> Result<(), MsgWithPos> {
-        let expr = match &self.token.kind {
-            TokenKind::Fun => self.parse_function()?,
-            TokenKind::Let | TokenKind::Var => self.parse_let()?,
-            TokenKind::Class => self.parse_class()?,
-            TokenKind::Import => self.parse_import()?,
-            v => panic!("{:?} {}", v, self.token.position),
-        };
+        let expr = self.parse_expression()?;
 
         self.ast.push(expr);
         Ok(())
@@ -102,7 +96,11 @@ impl<'a> Parser<'a> {
 
     fn parse_function(&mut self) -> EResult {
         let pos = self.expect_token(TokenKind::Fun)?.position;
-        let name = self.expect_identifier()?;
+        let name = if let TokenKind::Identifier(_) = &self.token.kind {
+            Some(self.expect_identifier()?)
+        } else {
+            None
+        };
         self.expect_token(TokenKind::LParen)?;
         let params = if self.token.kind == TokenKind::RParen {
             vec![]

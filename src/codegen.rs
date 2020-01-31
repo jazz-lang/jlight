@@ -30,8 +30,8 @@ pub enum Access {
 }
 
 pub struct Globals {
-    pub globals: HashMap<Global, i32>,
-    pub objects: HashMap<String, Vec<i32>>,
+    pub globals: LinkedHashMap<Global, i32>,
+    pub objects: LinkedHashMap<String, Vec<i32>>,
     pub functions: Vec<(Vec<BasicBlock>, Vec<(i32, i32)>, i32, i32)>,
     pub table: Vec<Global>,
 }
@@ -43,12 +43,20 @@ pub struct LoopControlInfo {
     pub continue_point: u16,
 }
 
+pub enum Unfinished {
+    Ins(Instruction),
+    Goto(String),
+    GotoF(String),
+    GotoT(String),
+}
+
 pub struct Context {
-    pub g: Globals,
+    pub g: Rc<RefCell<Globals>>,
     pub bbs: Vec<BasicBlock>,
     pub current_bb: usize,
-    pub locals: HashMap<String, i32>,
-    pub env: HashMap<String, i32>,
+    pub locals: LinkedHashMap<String, i32>,
+    pub env: LinkedHashMap<String, i32>,
+    pub labels: HashMap<String, Option<u32>>,
     loop_control_info: Vec<LoopControlInfo>,
     pub stack: i32,
     pub limit: i32,
@@ -61,6 +69,14 @@ pub struct Context {
 }
 
 impl Context {
+    pub fn new_empty_label(&mut self) -> String {
+        let lab_name = self.labels.len().to_string();
+        self.labels.insert(lab_name.clone(), None);
+        lab_name
+    }
+    pub fn label_here(&mut self, label: &str) {
+        *self.labels.get_mut(label).unwrap() = Some(self.current_bb as _);
+    }
     pub fn get_current_bb(&mut self) -> &mut BasicBlock {
         &mut self.bbs[self.current_bb]
     }
@@ -127,13 +143,14 @@ impl Context {
             Err(e) => resume_unwind(e),
         }
     }
-    pub fn global(&mut self, g: &Global) -> i32 {
-        return match self.g.globals.get(g).cloned() {
+    pub fn global(&mut self, global: &Global) -> i32 {
+        let mut g = self.g.borrow_mut();
+        return match g.globals.get(global).cloned() {
             Some(g) => g.clone(),
             None => {
-                let gid = self.g.table.len() as i32;
-                self.g.globals.insert(g.clone(), gid);
-                self.g.table.push(g.clone());
+                let gid = self.g.borrow().table.len() as i32;
+                g.globals.insert(global.clone(), gid);
+                g.table.push(global.clone());
                 gid
             }
         };
@@ -191,6 +208,39 @@ impl Context {
             _ => unimplemented!(),
         }
     }
+
+    pub fn emit_goto(&mut self, x: &str) {
+        self.write(Instruction::UnfinishedGoto(x.to_owned()))
+    }
+
+    pub fn emit_gotof(&mut self, r: u32, x: &str) {
+        self.write(Instruction::UnfinishedGotoF(r, x.to_owned()));
+    }
+
+    pub fn emit_gotot(&mut self, r: u32, x: &str) {
+        self.write(Instruction::UnfinishedGotoT(r, x.to_owned()));
+    }
+
+    pub fn finish(&mut self) {
+        let labels = self.labels.clone();
+        self.bbs.iter_mut().for_each(|bb| {
+            for ins in bb.instructions.iter_mut() {
+                let mut new = match ins {
+                    Instruction::UnfinishedGoto(ref lbl) => {
+                        Instruction::Goto(labels.get(lbl).unwrap().clone().unwrap() as _)
+                    }
+                    Instruction::UnfinishedGotoF(x, ref lbl) => {
+                        Instruction::GotoIfFalse(*x, labels.get(lbl).unwrap().clone().unwrap() as _)
+                    }
+                    Instruction::UnfinishedGotoT(x, ref lbl) => {
+                        Instruction::GotoIfTrue(*x, labels.get(lbl).unwrap().clone().unwrap() as _)
+                    }
+                    ref op => (*op).clone(),
+                };
+                std::mem::swap(ins, &mut new);
+            }
+        });
+    }
     pub fn compile_access(&mut self, e: &ExprKind) -> Access {
         match e {
             ExprKind::Ident(name) => {
@@ -233,6 +283,11 @@ impl Context {
                 0
             }
             ExprKind::Block(v) => {
+                if v.is_empty() {
+                    let r = self.new_reg();
+                    self.write(Instruction::LoadNull(r));
+                    return r;
+                }
                 let last = self.scoped(|ctx| {
                     let expr_next_bb = ctx.current_bb + 1;
                     ctx.write(Instruction::Goto(expr_next_bb as _));
@@ -282,7 +337,278 @@ impl Context {
                     0
                 }
             },
-            _ => unimplemented!(),
+
+            ExprKind::Var(_, name, init) => {
+                let r = match init {
+                    Some(val) => {
+                        let x = self.compile(&**val, tail);
+                        let r = self.new_reg();
+                        self.write(Instruction::Move(r, x));
+                        r
+                    }
+                    _ => {
+                        let r = self.new_reg();
+                        self.write(Instruction::LoadNull(r));
+                        r
+                    }
+                };
+                self.locals.insert(name.to_owned(), r as _);
+
+                r
+            }
+            ExprKind::Assign(lhs, rhs) => {
+                let a = self.compile_access(&lhs.expr);
+                let r = self.compile(rhs, false);
+                self.access_set(a, r);
+                r
+            }
+            ExprKind::Ident(s) => {
+                let s: &str = s;
+                if self.locals.contains_key(s) {
+                    let i = *self.locals.get(s).unwrap();
+                    let r = i as u32;
+                    return r;
+                } else if self.env.contains_key(s) {
+                    self.nenv += 1;
+                    let r = self.new_reg();
+                    let pos = if !self.used_upvars.contains_key(s) {
+                        let pos = self.used_upvars.len();
+
+                        self.used_upvars.insert(s.to_owned(), pos as _);
+                        pos as u16
+                    } else {
+                        *self.used_upvars.get(s).unwrap() as u16
+                    };
+                    self.write(Instruction::LoadU(r, pos as _));
+                    return r;
+                } else {
+                    let g = self.global(&Global::Var(s.to_owned()));
+                    let r = self.new_reg();
+                    self.write(Instruction::LoadGlobal(r, g as _));
+                    return r;
+                }
+            }
+            ExprKind::Function(name, params, body) => {
+                let r = self.compile_function(params, body, None);
+                return r;
+            }
+            expr => panic!("{:?}", expr),
         }
     }
+
+    fn ident(&mut self, name: &str) -> u32 {
+        let s: &str = name;
+        if self.locals.contains_key(s) {
+            let i = *self.locals.get(s).unwrap();
+            let r = i as u32;
+            return r;
+        } else if self.env.contains_key(s) {
+            self.nenv += 1;
+            let r = self.new_reg();
+            let pos = if !self.used_upvars.contains_key(s) {
+                let pos = self.used_upvars.len();
+
+                self.used_upvars.insert(s.to_owned(), pos as _);
+                pos as u16
+            } else {
+                *self.used_upvars.get(s).unwrap() as u16
+            };
+            self.write(Instruction::LoadU(r, pos as _));
+            return r;
+        } else {
+            let g = self.global(&Global::Var(s.to_owned()));
+            let r = self.new_reg();
+            self.write(Instruction::LoadGlobal(r, g as _));
+            return r;
+        }
+    }
+
+    pub fn compile_function(
+        &mut self,
+        params: &[String],
+        e: &Box<Expr>,
+        vname: Option<&str>,
+    ) -> u32 {
+        let mut ctx = Context {
+            g: self.g.clone(),
+            bbs: vec![BasicBlock {
+                instructions: vec![],
+            }],
+            pos: Vec::new(),
+            limit: self.stack,
+            stack: self.stack,
+            locals: LinkedHashMap::new(),
+            labels: self.labels.clone(),
+            nenv: 0,
+            env: self.locals.clone(),
+            current_bb: 0,
+            used_upvars: LinkedHashMap::new(),
+            loop_control_info: vec![],
+            cur_pos: (0, 0),
+            cur_file: String::new(),
+            regs: 0,
+        };
+        for (idx, p) in params.iter().enumerate() {
+            ctx.stack += 1;
+            ctx.locals.insert(p.to_owned(), idx as i32);
+        }
+
+        let gid = ctx.g.borrow().table.len();
+        if vname.is_some() {
+            ctx.g
+                .borrow_mut()
+                .globals
+                .insert(Global::Var(vname.unwrap().to_owned()), gid as i32);
+        }
+        ctx.g.borrow_mut().table.push(Global::Func(gid as i32, -1));
+        ctx.compile(e, true);
+        ctx.write(Instruction::Return(None));
+        //ctx.check_stack(s, "");
+
+        ctx.g.borrow_mut().functions.push((
+            ctx.bbs.clone(),
+            ctx.pos.clone(),
+            gid as i32,
+            params.len() as i32,
+        ));
+
+        if ctx.nenv > 0 {
+            for (var, _) in ctx.used_upvars.iter().rev() {
+                let r = self.ident(var);
+                self.write(Instruction::Push(r));
+            }
+            let r = self.new_reg();
+            self.write(Instruction::LoadGlobal(r, gid as _));
+
+            self.write(Instruction::MakeEnv(r, (ctx.used_upvars.len()) as u32));
+            return r;
+        } else {
+            let r = self.new_reg();
+            self.write(Instruction::LoadGlobal(r, gid as _));
+            return r;
+        }
+    }
+    pub fn new() -> Self {
+        let g = Globals {
+            globals: LinkedHashMap::new(),
+            objects: LinkedHashMap::new(),
+            functions: vec![],
+            table: vec![],
+        };
+        Self {
+            g: Rc::new(RefCell::new(g)),
+            used_upvars: LinkedHashMap::new(),
+            locals: LinkedHashMap::new(),
+            limit: 0,
+            nenv: 0,
+            bbs: vec![BasicBlock {
+                instructions: vec![],
+            }],
+            current_bb: 0,
+            labels: HashMap::new(),
+            loop_control_info: vec![],
+            cur_pos: (0, 0),
+            cur_file: String::new(),
+            env: LinkedHashMap::new(),
+            pos: vec![],
+            regs: 0,
+            stack: 0,
+        }
+    }
+}
+
+pub fn compile(ast: Vec<Box<Expr>>) -> Context {
+    let mut ctx = Context::new();
+    let ast = Box::new(Expr {
+        pos: crate::token::Position::new(0, 0),
+        expr: ExprKind::Block(ast.clone()),
+    });
+
+    ctx.compile(&ast, false);
+    ctx.write(Instruction::Return(None));
+    /*
+    if ctx.g.borrow().functions.len() != 0 || ctx.g.borrow().objects.len() != 0 {
+        let functions = ctx.g.borrow().functions.clone();
+        let ctxops = ctx.bbs.clone();
+        let _ctxpos = ctx.pos.clone();
+        let ops = vec![BasicBlock {
+            instructions: vec![Instruction::Goto(0)],
+        }];
+        let pos = vec![];
+        ctx.bbs = ops;
+        ctx.current_bb = 0;
+        ctx.pos = pos;
+
+        for (fops, fpos, gid, nargs) in functions.iter().rev() {
+            let mut g = ctx.g.borrow_mut();
+            g.table[*gid as usize] = Global::Func(ctx.bbs.len() as _, *nargs);
+
+            for bb in fops {
+                ctx.bbs.push(bb.clone());
+            }
+            let to = ctx.bbs.len();
+            ctx.bbs[0].instructions[0] = Instruction::Goto(to as u16 + 1);
+        }
+        for bb in ctxops.iter() {
+            ctx.bbs.push(bb.clone());
+        }
+    }
+
+    ctx.finish();*/
+    let mut bfc = BytecodeFunction::new();
+    for (i, bb) in ctx.bbs.iter().enumerate() {
+        bfc.block(i, regalloc::TypedIxVec::from_vec(bb.instructions.clone()));
+    }
+
+    regalloc(&mut bfc);
+    ctx
+}
+
+use jlight_vm::runtime::state::RcState;
+use jlight_vm::util::ptr::Ptr;
+pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
+    let mut m = Arc::new(Module::new());
+    m.globals = Ptr::new(vec![ObjectPointer::null(); context.g.borrow().table.len()]);
+
+    for (blocks, _, gid, params) in context.g.borrow().functions.iter() {
+        let f = Function {
+            name: Arc::new(String::new()),
+            argc: *params as i32,
+            code: blocks.clone(),
+            module: m.clone(),
+            native: None,
+            upvalues: vec![],
+        };
+        let object =
+            Object::with_prototype(ObjectValue::Function(Box::new(f)), state.function_prototype);
+        m.globals.get()[*gid as usize] = state.gc.allocate(object);
+    }
+
+    for (i, g) in context.g.borrow().table.iter().enumerate() {
+        match g {
+            Global::Str(x) => {
+                let value = ObjectValue::String(Arc::new(x.to_owned()));
+                m.globals.get()[i] = state
+                    .gc
+                    .allocate(Object::with_prototype(value, ObjectPointer::null()));
+            }
+
+            _ => (),
+        }
+    }
+    let entry = Function {
+        name: Arc::new(String::from("main")),
+        argc: 0,
+        code: context.bbs.clone(),
+        module: m.clone(),
+        native: None,
+        upvalues: vec![],
+    };
+    let object = Object::with_prototype(
+        ObjectValue::Function(Box::new(entry)),
+        state.function_prototype,
+    );
+    m.globals.get().push(state.gc.allocate(object));
+
+    m
 }

@@ -23,6 +23,7 @@ pub struct Context {
     pub return_register: Option<u32>,
     pub terminate_upon_return: bool,
     pub module: Arc<Module>,
+    pub code: Vec<BasicBlock>,
     pub parent: Option<Box<Context>>,
 }
 use fxhash::FxBuildHasher;
@@ -38,10 +39,10 @@ impl Context {
             return_register: None,
             terminate_upon_return: true,
             module: Arc::new(Module {
-                code: vec![],
                 labels: HashMap::with_hasher(FxBuildHasher::default()),
                 globals: Ptr::null(),
             }),
+            code: vec![],
             parent: None,
             this: ObjectPointer::null(),
         }
@@ -64,19 +65,6 @@ impl Context {
                 .for_each(|pointer| cb(pointer.pointer()));
             current = context.parent.as_ref().map(|c| &**c);
         }
-    }
-
-    pub fn fetch_ins(&mut self) -> Instruction {
-        if self.ip >= self.module.code[self.bp].instructions.len() {
-            self.bp += 1;
-        }
-        let ins: &Instruction = unsafe {
-            self.module.code[self.bp]
-                .instructions
-                .get_unchecked(self.ip)
-        };
-        self.ip += 1;
-        *ins
     }
 
     pub fn set_register(&mut self, r: u32, value: ObjectPointer) {

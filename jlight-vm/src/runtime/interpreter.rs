@@ -36,11 +36,11 @@ impl Runtime {
         let mut instruction;
         reset_context!(thread, context, bindex, index);
         'exec_loop: loop {
-            if index >= unsafe { context.module.code.get_unchecked(bindex).instructions.len() } {
+            if index >= unsafe { context.code.get_unchecked(bindex).instructions.len() } {
                 bindex += 1;
                 index = 0;
             }
-            let block: &BasicBlock = unsafe { context.module.code.get_unchecked(bindex) };
+            let block: &BasicBlock = unsafe { context.code.get_unchecked(bindex) };
             instruction = block.instructions[index].clone();
             index += 1;
             match instruction {
@@ -94,7 +94,8 @@ impl Runtime {
                             ObjectValue::Function(ref function) => {
                                 if let None = function.native {
                                     thread.pop_context();
-                                    new_ctx.bp = function.block as _;
+                                    new_ctx.code = function.code.clone();
+                                    new_ctx.bp = 0;
                                     new_ctx.module = function.module.clone();
                                     new_ctx.upvalues =
                                         function.upvalues.iter().map(|x| x.clone()).collect();
@@ -128,7 +129,8 @@ impl Runtime {
                         match function.get().value {
                             ObjectValue::Function(ref function) => {
                                 if let None = function.native {
-                                    new_ctx.bp = function.block as _;
+                                    new_ctx.code = function.code.clone();
+                                    new_ctx.bp = 0;
                                     new_ctx.module = function.module.clone();
                                     new_ctx.upvalues =
                                         function.upvalues.iter().map(|x| x.clone()).collect();
@@ -180,7 +182,8 @@ impl Runtime {
                                             );
                                         }
                                         new_ctx.this = this;
-                                        new_ctx.bp = function.block as _;
+                                        new_ctx.code = function.code.clone();
+                                        new_ctx.bp = 0;
                                         new_ctx.module = function.module.clone();
                                         new_ctx.this = this;
                                         new_ctx.upvalues =
@@ -226,7 +229,8 @@ impl Runtime {
                         match function.get().value {
                             ObjectValue::Function(ref function) => {
                                 if let None = function.native {
-                                    new_ctx.bp = function.block as _;
+                                    new_ctx.code = function.code.clone();
+                                    new_ctx.bp = 0;
                                     new_ctx.module = function.module.clone();
                                     new_ctx.this = this;
                                     new_ctx.upvalues =

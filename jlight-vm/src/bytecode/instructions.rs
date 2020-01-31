@@ -1,4 +1,4 @@
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum Instruction {
     Load(u32, u32, u32),
     Store(u32, u32, u32),
@@ -49,6 +49,9 @@ pub enum Instruction {
     CatchBlock(u32, u32),
     Move(u32, u32),
     Safepoint,
+    UnfinishedGoto(String),
+    UnfinishedGotoF(u32, String),
+    UnfinishedGotoT(u32, String),
 }
 use regalloc::{
     BlockIx, InstIx, Map, MyRange, RealReg, RealRegUniverse, Reg, RegClass, Set, SpillSlot,
