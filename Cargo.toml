@@ -1,5 +1,5 @@
 [package]
-name = "jlight"
+name = "jlightc"
 version = "0.1.0"
 authors = ["playXE <adel.prokurov@protonmail.com>"]
 edition = "2018"
@@ -7,10 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ahash = "0.3"
-parking_lot = "0.10"
-crossbeam-deque = "0.7"
-crossbeam-channel = "0.4"
-mimalloc = "0.1"
-lazy_static = "1.4"
-num_cpus = "1.12"
+hmap = "0.1"
+jlight-vm = {path = "jlight-vm"}
+regalloc = {path = "jlight-vm/regalloc.rs/lib"}
+hashlink = "0.4"

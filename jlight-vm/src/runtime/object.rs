@@ -1,7 +1,9 @@
+use super::module::Module;
+use crate::runtime::state::{RcState, State};
+use crate::util::arc::Arc;
 use crate::util::tagged_pointer::*;
 use ahash::AHashMap;
 use std::fs;
-use std::sync::Arc;
 pub enum ObjectValue {
     None,
     Number(f64),
@@ -11,6 +13,7 @@ pub enum ObjectValue {
     Array(Box<Vec<ObjectPointer>>),
     ByteArray(Box<Vec<u8>>),
     Function(Box<Function>),
+    Module(Arc<Module>),
 }
 
 impl ObjectValue {
@@ -38,16 +41,21 @@ macro_rules! push_collection {
     }};
 }
 
+pub type NativeFn = extern "C" fn(&Runtime, ObjectPointer, &[ObjectPointer]) -> ObjectPointer;
+
+use super::Runtime;
+
 pub struct Function {
     /// function name
     pub name: Arc<String>,
     /// captured values from parent scope
     pub upvalues: Vec<ObjectPointer>,
     pub argc: i32,
-    /// function entrypoint
+    /// function entry point
     pub block: u16,
     /// Native function pointer
-    pub native: Option<extern "C" fn(ObjectPointer, &[ObjectPointer]) -> ObjectPointer>,
+    pub native: Option<extern "C" fn(&Runtime, ObjectPointer, &[ObjectPointer]) -> ObjectPointer>,
+    pub module: Arc<Module>,
 }
 
 /// The bit to set for tagged integers.
@@ -66,6 +74,19 @@ unsafe impl Sync for ObjectPointer {}
 unsafe impl Send for ObjectPointer {}
 
 impl ObjectPointer {
+    pub fn is_false(&self, state: &RcState) -> bool {
+        if self.is_tagged_number() {
+            self.number_value().unwrap() == 0.0
+        } else {
+            match self.get().value {
+                ObjectValue::Bool(true) => false,
+                ObjectValue::Bool(false) => true,
+                ObjectValue::None => true,
+                _ => *self == state.nil_prototype,
+            }
+        }
+    }
+
     pub fn pointer(&self) -> ObjectPointerPointer {
         ObjectPointerPointer {
             raw: self as *const Self,
@@ -77,6 +98,74 @@ impl ObjectPointer {
             true
         } else {
             self.get().marked
+        }
+    }
+    pub fn prototype(&self, state: &State) -> Option<ObjectPointer> {
+        if self.is_tagged_number() {
+            Some(state.number_prototype)
+        } else {
+            self.get().prototype()
+        }
+    }
+    pub fn set_prototype(&self, proto: ObjectPointer) {
+        self.get_mut().set_prototype(proto);
+    }
+    pub fn is_kind_of(&self, state: &RcState, other: ObjectPointer) -> bool {
+        let mut prototype = self.prototype(state);
+
+        while let Some(proto) = prototype {
+            if proto == other {
+                return true;
+            }
+
+            prototype = proto.prototype(state);
+        }
+
+        false
+    }
+
+    /// Adds an attribute to the object this pointer points to.
+    pub fn add_attribute(&self, name: &Arc<String>, attr: ObjectPointer) {
+        self.get_mut().add_attribute(name.clone(), attr);
+
+        //process.write_barrier(*self, attr);
+    }
+
+    /// Looks up an attribute.
+    pub fn lookup_attribute(&self, state: &RcState, name: &Arc<String>) -> Option<ObjectPointer> {
+        if self.is_tagged_number() {
+            state.number_prototype.get().lookup_attribute(name)
+        } else {
+            self.get().lookup_attribute(name)
+        }
+    }
+
+    /// Looks up an attribute without walking the prototype chain.
+    pub fn lookup_attribute_in_self(
+        &self,
+        state: &RcState,
+        name: &Arc<String>,
+    ) -> Option<ObjectPointer> {
+        if self.is_tagged_number() {
+            state.number_prototype.get().lookup_attribute_in_self(name)
+        } else {
+            self.get().lookup_attribute_in_self(name)
+        }
+    }
+
+    pub fn attributes(&self) -> Vec<ObjectPointer> {
+        if self.is_tagged_number() {
+            vec![]
+        } else {
+            self.get().attributes()
+        }
+    }
+
+    pub fn attribute_names(&self) -> Vec<&Arc<String>> {
+        if self.is_tagged_number() {
+            vec![]
+        } else {
+            self.get().attribute_names()
         }
     }
 
@@ -94,6 +183,63 @@ impl ObjectPointer {
         }
         let x = self.get_mut();
         x.marked = false;
+    }
+
+    pub fn as_string(&self) -> Result<&Arc<String>, String> {
+        if self.is_tagged_number() {
+            Err(format!("Called ObjectPointer::as_string() on non string"))
+        } else {
+            match self.get().value {
+                ObjectValue::String(ref s) => Ok(s),
+                _ => Err(format!("Called ObjectPointer::as_string() on non string")),
+            }
+        }
+    }
+
+    pub fn to_string(&self) -> Arc<String> {
+        if self.is_tagged_number() {
+            Arc::new(self.number_value().unwrap().to_string())
+        } else {
+            match self.get().value {
+                ObjectValue::String(ref s) => s.clone(),
+                ObjectValue::Array(ref array) => {
+                    use std::fmt::Write;
+                    let mut fmt_buf = String::new();
+                    write!(fmt_buf, "[").unwrap();
+                    for (i, object) in array.iter().enumerate() {
+                        write!(fmt_buf, "{}", object.to_string()).unwrap();
+                        if i != array.len() - 1 {
+                            write!(fmt_buf, ",").unwrap();
+                        }
+                    }
+                    write!(fmt_buf, "]").unwrap();
+
+                    Arc::new(fmt_buf)
+                }
+                ObjectValue::File(_) => Arc::new(String::from("File")),
+                ObjectValue::ByteArray(ref array) => Arc::new(format!("{:?}", array)),
+                ObjectValue::Function(_) => Arc::new(String::from("Function")),
+                ObjectValue::Number(n) => Arc::new(n.to_string()),
+                ObjectValue::Module(_) => Arc::new(String::from("Module")),
+                ObjectValue::None => {
+                    if self.get().has_attributes() {
+                        use std::fmt::Write;
+                        let mut fmt_buf = String::new();
+                        write!(fmt_buf, "{{\n").unwrap();
+                        for (i, (key, value)) in
+                            self.get().attributes.as_ref().unwrap().iter().enumerate()
+                        {
+                            write!(fmt_buf, "  {}: {}\n", key, value.to_string()).unwrap();
+                        }
+
+                        Arc::new(fmt_buf)
+                    } else {
+                        Arc::new(String::from("{}"))
+                    }
+                }
+                _ => unimplemented!(),
+            }
+        }
     }
 
     pub fn number(x: f64) -> Self {
@@ -256,11 +402,14 @@ impl Object {
     }
 
     /// Returns all the attribute names available to this object.
-    pub fn attribute_names(&self) -> Vec<Arc<String>> {
+    pub fn attribute_names(&self) -> Vec<&Arc<String>> {
         let mut attributes = Vec::new();
 
         if let Some(map) = self.attributes_map() {
-            push_collection!(map, keys, attributes);
+            for (key, _) in map.iter() {
+                attributes.push(key);
+            }
+            //push_collection!(map, keys, attributes);
         }
 
         attributes
@@ -467,3 +616,20 @@ impl Eq for ObjectPointerPointer {}
 
 unsafe impl Sync for ObjectPointerPointer {}
 unsafe impl Send for ObjectPointerPointer {}
+
+pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> ObjectPointer {
+    let function = Function {
+        argc,
+        upvalues: vec![],
+        native: Some(fun),
+        block: 0,
+        module: Arc::new(Module::new()),
+        name: Arc::new(String::new()),
+    };
+
+    let object = Object::with_prototype(
+        ObjectValue::Function(Box::new(function)),
+        state.function_prototype,
+    );
+    state.gc.allocate(object)
+}

@@ -1,6 +1,6 @@
 use crate::runtime::object::*;
+use crate::util::arc::Arc;
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
-use std::sync::Arc;
 pub struct Pool {
     /// A global queue to steal jobs from.
     global_queue: Injector<ObjectPointerPointer>,

@@ -1,8 +1,10 @@
 use super::tracer::*;
 use crate::runtime::object::*;
+use crate::runtime::state::*;
+use crate::runtime::threads::JThread;
+use crate::util::arc::Arc;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
 const INITIAL_THRESHOLD: usize = 100;
 
 // after collection we want the the ratio of used/total to be no
@@ -12,13 +14,11 @@ const INITIAL_THRESHOLD: usize = 100;
 const USED_SPACE_RATIO: f64 = 0.7;
 
 pub struct GlobalCollector {
-    heap: Mutex<Vec<ObjectPointer>>,
-    threshold: AtomicUsize,
-    bytes_allocated: AtomicUsize,
-    pool: Arc<Pool>,
-    collecting: AtomicBool,
-    blocking: Mutex<usize>,
-    reached_zero: parking_lot::Condvar,
+    pub heap: Mutex<Vec<ObjectPointer>>,
+    pub threshold: AtomicUsize,
+    pub bytes_allocated: AtomicUsize,
+    pub pool: Arc<Pool>,
+    pub collecting: AtomicBool,
 }
 
 impl GlobalCollector {
@@ -36,7 +36,7 @@ impl GlobalCollector {
 
             retain
         });
-        if allocated as f64 > self.threshold.load(Ordering::Acquire) as f64 * USED_SPACE_RATIO {
+        if allocated as f64 > self.threshold.load(Ordering::Relaxed) as f64 * USED_SPACE_RATIO {
             // we didn't collect enough, so increase the
             // threshold for next time, to avoid thrashing the
             // collector too much/behaving quadratically.
@@ -49,8 +49,13 @@ impl GlobalCollector {
         drop(heap);
     }
 
-    pub fn collect(&self) {
+    pub fn collect(&self, state: &State) {
         self.collecting.store(true, Ordering::Release);
+        stop_the_world(state, |thread| {
+            thread.each_pointer(|object| {
+                self.pool.schedule(object);
+            });
+        });
         self.pool.run();
         self.sweep();
         self.collecting.store(false, Ordering::Release);
@@ -60,7 +65,7 @@ impl GlobalCollector {
         self.bytes_allocated.load(Ordering::Acquire) > self.threshold.load(Ordering::Acquire)
     }
 
-    pub fn allocate(&mut self, object: Object) -> ObjectPointer {
+    pub fn allocate(&self, object: Object) -> ObjectPointer {
         unsafe {
             let mut heap = self.heap.lock();
             let pointer = std::alloc::alloc(std::alloc::Layout::new::<Object>()).cast::<Object>();
@@ -84,22 +89,57 @@ lazy_static::lazy_static! {
         bytes_allocated: AtomicUsize::new(0),
         pool: Pool::new(num_cpus::get() / 2),
         collecting: AtomicBool::new(true),
+    };
+
+    static ref STW: StopTheWorld = StopTheWorld {
         blocking: Mutex::new(0),
-        reached_zero: parking_lot::Condvar::new()
+        cnd: parking_lot::Condvar::new()
     };
 }
 
-pub fn safepoint() {
-    if GLOBAL.collecting.load(Ordering::Relaxed) {
-        while GLOBAL.collecting.load(Ordering::Relaxed) {
-            std::thread::yield_now();
+const GC_YIELD_MAX_ATTEMPT: u64 = 2;
+/// Stop-theWorld pause mechanism. During safepoint all threads running jlight vm bytecode are suspended.
+pub fn safepoint(state: &State) {
+    if state.gc.collecting.load(Ordering::Relaxed) {
+        let mut blocking = STW.blocking.lock();
+        assert!(*blocking > 0);
+        *blocking -= 1;
+        if *blocking == 0 {
+            STW.cnd.notify_all();
         }
+        let mut attempt = 0;
+        while state.gc.collecting.load(Ordering::Relaxed) {
+            if attempt >= 2 {
+                std::thread::sleep(std::time::Duration::from_micros(
+                    (attempt - GC_YIELD_MAX_ATTEMPT) * 1000,
+                ));
+            } else {
+                std::thread::yield_now();
+            }
+            attempt += 1;
+        }
+    } else if state.gc.should_collect() {
+        state.gc.collect(state);
     }
-    if GLOBAL.should_collect() {
-        /*let mut blocking = GLOBAL.blocking.lock();
-        while *blocking > 0 {
-            GLOBAL.reached_zero.wait(&mut blocking);
-        }*/
-        GLOBAL.collect();
+}
+
+struct StopTheWorld {
+    blocking: Mutex<usize>,
+    cnd: parking_lot::Condvar,
+}
+
+fn stop_the_world<F: FnMut(&JThread)>(state: &State, mut cb: F) {
+    // lock threads from starting or exiting
+    let threads = state.threads.threads.lock();
+    std::sync::atomic::fence(Ordering::SeqCst);
+
+    let mut blocking = STW.blocking.lock();
+    *blocking = threads.len();
+    while *blocking > 0 {
+        STW.cnd.wait(&mut blocking);
+    }
+
+    for thread in threads.iter() {
+        cb(thread);
     }
 }
