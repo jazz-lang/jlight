@@ -1,11 +1,18 @@
-use super::string_pool::{intern, str};
-use super::threads::*;
-use super::*;
-use crate::bytecode::{block::BasicBlock, instructions::Instruction};
-use crate::heap::global::safepoint;
+use crate::bytecode::block::*;
+use crate::bytecode::instructions::*;
+use crate::heap::global::*;
+use crate::runtime;
 use crate::util::arc::Arc;
+use ahash::AHashMap;
 use context::*;
 use object::*;
+use runtime::*;
+use string_pool::*;
+use threads::*;
+pub extern "C" fn is_number(object: ObjectPointer) -> bool {
+    object.is_tagged_number()
+}
+
 macro_rules! reset_context {
     ($process:expr, $context:ident, $index:ident,$bindex: ident) => {{
         $context = $process.context_mut();
@@ -28,8 +35,39 @@ macro_rules! catch {
     }};
 }
 
+pub struct TraceInfo {
+    pub invocations: usize,
+    pub trace: Vec<TraceInstruction>,
+}
+
+pub enum Guard {
+    Greater(u32, u32),
+    Less(u32, u32),
+    GreaterEqual(u32, u32),
+    LessEqual(u32, u32),
+    Equal(u32, u32),
+    NotEqual(u32, u32),
+    Number(u32),
+    Int8(u32),
+    Int16(u32),
+    Int32(u32),
+    Int64(u32),
+}
+
+pub enum TraceInstruction {
+    Instruction(Instruction),
+    Guard(Guard),
+}
+
+pub struct TracingInterpreter {
+    trace_info: AHashMap<ObjectPointer, TraceInfo>,
+}
 impl Runtime {
-    pub fn run(&self, thread: &Arc<JThread>) -> ObjectPointer {
+    pub fn run_tracing(
+        &self,
+        thread: &Arc<JThread>,
+        trace_info: &mut AHashMap<ObjectPointer, TraceInfo>,
+    ) -> ObjectPointer {
         let mut context: &mut Context;
         let mut index;
         let mut bindex;
@@ -628,6 +666,7 @@ impl Runtime {
                     let r1 = context.get_register(r1);
                     let r2 = context.get_register(r2);
                     if r1.is_tagged_number() && r2.is_tagged_number() {
+                        if r1.number_value().unwrap() > r2.number_value().unwrap() {}
                         context.set_register(
                             r0,
                             self.allocate_bool(
@@ -823,19 +862,5 @@ impl Runtime {
                 x => panic!("{:?}", x),
             }
         }
-    }
-
-    pub fn allocate_null(&self) -> ObjectPointer {
-        self.state.nil_prototype
-    }
-
-    pub fn allocate_string(&self, s: Arc<String>) -> ObjectPointer {
-        let object = Object::with_prototype(ObjectValue::String(s), self.state.string_prototype);
-        self.state.gc.allocate(object)
-    }
-
-    pub fn allocate_bool(&self, x: bool) -> ObjectPointer {
-        let object = Object::with_prototype(ObjectValue::Bool(x), self.state.boolean_prototype);
-        self.state.gc.allocate(object)
     }
 }

@@ -43,13 +43,6 @@ pub struct LoopControlInfo {
     pub continue_point: u16,
 }
 
-pub enum Unfinished {
-    Ins(Instruction),
-    Goto(String),
-    GotoF(String),
-    GotoT(String),
-}
-
 pub struct Context {
     pub g: Rc<RefCell<Globals>>,
     pub bbs: Vec<BasicBlock>,
@@ -184,6 +177,11 @@ impl Context {
                 self.write(Instruction::Store(obj, sr, r));
             }
             Access::Index(i) => unimplemented!(),
+            Access::Array(value, index) => {
+                let value = self.compile(&value, false);
+                let index = self.compile(&index, false);
+                self.write(Instruction::Store(value, index, r));
+            }
             //Access::This => self.write(Opcode::SetThis),
             //Access::Array => self.write(Opcode::SetArray),
             _ => unimplemented!(),
@@ -219,6 +217,12 @@ impl Context {
             }
             Access::This => {
                 self.write(Instruction::LoadThis(r));
+                return r;
+            }
+            Access::Array(value, index) => {
+                let value = self.compile(&value, false);
+                let index = self.compile(&index, false);
+                self.write(Instruction::Load(r, value, index));
                 return r;
             }
             _ => unimplemented!(),
@@ -590,6 +594,13 @@ impl Context {
                         end_bb_id as _,
                     ));
                 ret
+            }
+            ExprKind::ArrayIndex(value, index) => {
+                let value = self.compile(value, tail);
+                let index = self.compile(index, tail);
+                let r = self.new_reg();
+                self.write(Instruction::Load(r, value, index));
+                r
             }
             ExprKind::Call(value, args) => {
                 for arg in args.iter() {
