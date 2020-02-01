@@ -22,7 +22,7 @@ pub enum Global {
 pub enum Access {
     Env(i32),
     Stack(i32),
-    Global(i32),
+    Global(i32, bool, String),
     Field(Box<Expr>, String),
     Index(i32),
     Array(Box<Expr>, Box<Expr>),
@@ -32,7 +32,7 @@ pub enum Access {
 pub struct Globals {
     pub globals: LinkedHashMap<Global, i32>,
     pub objects: LinkedHashMap<String, Vec<i32>>,
-    pub functions: Vec<(Vec<BasicBlock>, Vec<(i32, i32)>, i32, i32)>,
+    pub functions: Vec<(Vec<BasicBlock>, Vec<(i32, i32)>, i32, i32, String)>,
     pub table: Vec<Global>,
 }
 use hashlink::*;
@@ -143,15 +143,26 @@ impl Context {
             Err(e) => resume_unwind(e),
         }
     }
-    pub fn global(&mut self, global: &Global) -> i32 {
+    pub fn global(&mut self, global: &Global) -> (i32, bool) {
         let mut g = self.g.borrow_mut();
         return match g.globals.get(global).cloned() {
-            Some(g) => g.clone(),
+            Some(g) => (g.clone(), false),
             None => {
-                let gid = self.g.borrow().table.len() as i32;
+                let gid = g.table.len() as i32;
                 g.globals.insert(global.clone(), gid);
                 g.table.push(global.clone());
-                gid
+                (gid, true)
+            }
+        };
+    }
+
+    pub fn global2(&mut self, global: &Global) -> (i32, bool) {
+        let mut g = self.g.borrow_mut();
+        return match g.globals.get(global).cloned() {
+            Some(g) => (g.clone(), false),
+            None => {
+                let gid = g.table.len() as i32;
+                (gid, true)
             }
         };
     }
@@ -164,9 +175,9 @@ impl Context {
                 self.write(Instruction::StoreU(r, n as _));
             }
             Access::Stack(l) => self.write(Instruction::Move(l as _, r)),
-            Access::Global(g) => unimplemented!(),
+            Access::Global(g, _, _) => unimplemented!(),
             Access::Field(obj, f) => {
-                let gid = self.global(&Global::Str(f.to_owned()));
+                let (gid, _) = self.global(&Global::Str(f.to_owned()));
                 let sr = self.new_reg();
                 let obj = self.compile(&*obj, false);
                 self.write(Instruction::LoadGlobal(sr, gid as _));
@@ -189,12 +200,17 @@ impl Context {
                 self.write(Instruction::Move(r, l as _));
                 return r;
             }
-            Access::Global(x) => {
-                self.write(Instruction::LoadGlobal(r, x as _));
+            Access::Global(x, n, name) => {
+                if !n {
+                    self.write(Instruction::LoadGlobal(r, x as _));
+                } else {
+                    let (gid, _) = self.global(&Global::Str(name));
+                    self.write(Instruction::LoadStatic(r, gid as _));
+                }
                 return r;
             }
             Access::Field(e, f) => {
-                let gid = self.global(&Global::Str(f));
+                let (gid, _) = self.global(&Global::Str(f));
                 let g = self.new_reg();
                 self.write(Instruction::LoadGlobal(g, gid as _));
                 let o = self.compile(&*e, false);
@@ -255,8 +271,8 @@ impl Context {
                     self.nenv += 1;
                     return Access::Env(*l.unwrap());
                 } else {
-                    let g = self.global(&Global::Var(name.to_owned()));
-                    return Access::Global(g);
+                    let (g, n) = self.global(&Global::Var(name.to_owned()));
+                    return Access::Global(g, n, name.to_owned());
                 }
             }
             ExprKind::Access(e, f) => {
@@ -271,6 +287,82 @@ impl Context {
     }
 
     pub fn load_args(&mut self, names: &[String]) {}
+
+    pub fn compile_binop(&mut self, op: &str, e1: &Expr, e2: &Expr, tail: bool) -> u32 {
+        match op {
+            "==" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Equal(r3, r1, r2));
+                r3
+            }
+            "!=" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::NotEqual(r3, r1, r2));
+                r3
+            }
+            ">" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Greater(r3, r1, r2));
+                r3
+            }
+            ">=" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::GreaterEqual(r3, r1, r2));
+                r3
+            }
+            "<" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Less(r3, r1, r2));
+                r3
+            }
+            "<=" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::LessEqual(r3, r1, r2));
+                r3
+            }
+            "+" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Add(r3, r1, r2));
+                r3
+            }
+            "-" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Sub(r3, r1, r2));
+                r3
+            }
+            "/" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Div(r3, r1, r2));
+                r3
+            }
+            "*" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::Mul(r3, r1, r2));
+                r3
+            }
+            _ => unimplemented!(),
+        }
+    }
 
     pub fn compile(&mut self, e: &Expr, tail: bool) -> u32 {
         match &e.expr {
@@ -310,6 +402,7 @@ impl Context {
                     }
                 }
             }
+            ExprKind::BinOp(e1, op, e2) => self.compile_binop(op, e1, e2, tail),
             ExprKind::ConstInt(x) => {
                 let r = self.new_reg();
                 self.write(Instruction::LoadInt(r, *x as u64));
@@ -321,7 +414,7 @@ impl Context {
                 r
             }
             ExprKind::ConstStr(s) => {
-                let gid = self.global(&Global::Str(s.to_owned()));
+                let (gid, _) = self.global(&Global::Str(s.to_owned()));
                 let g = self.new_reg();
                 self.write(Instruction::LoadGlobal(g, gid as _));
                 g
@@ -330,10 +423,12 @@ impl Context {
                 Some(e) => {
                     let r = self.compile(e, false);
                     self.write(Instruction::Return(Some(r)));
+                    self.move_forward();
                     r
                 }
                 _ => {
                     self.write(Instruction::Return(None));
+                    self.move_forward();
                     0
                 }
             },
@@ -362,6 +457,50 @@ impl Context {
                 self.access_set(a, r);
                 r
             }
+            ExprKind::If(cond, if_true, if_false) => {
+                let before_bb_id = self.current_bb;
+                self.move_forward();
+                let terminator_bb_id = self.current_bb;
+                self.move_forward();
+                let r = self.compile(cond, tail);
+                let br_begin = self.current_bb;
+                let else_begin;
+                let ret = self.new_reg();
+                if let Some(if_false) = if_false {
+                    self.move_forward();
+                    else_begin = self.current_bb;
+                    let last = self.compile(if_false, tail);
+                    self.write(Instruction::Move(ret, last));
+                    self.get_current_bb()
+                        .instructions
+                        .push(Instruction::Goto(terminator_bb_id as _));
+                } else {
+                    self.write(Instruction::LoadNull(ret));
+                    else_begin = terminator_bb_id;
+                }
+                self.move_forward();
+                self.bbs[before_bb_id]
+                    .instructions
+                    .push(Instruction::Goto(br_begin as _));
+                let checker_bb = br_begin;
+                let current_bb = self.current_bb;
+                self.bbs[checker_bb]
+                    .instructions
+                    .push(Instruction::ConditionalGoto(
+                        r,
+                        current_bb as _,
+                        else_begin as _,
+                    ));
+                self.compile(if_true, tail);
+                self.write(Instruction::Goto(terminator_bb_id as _));
+
+                self.move_forward();
+                let end_bb_id = self.current_bb;
+                self.bbs[terminator_bb_id]
+                    .instructions
+                    .push(Instruction::Goto(end_bb_id as _));
+                ret
+            }
             ExprKind::Ident(s) => {
                 let s: &str = s;
                 if self.locals.contains_key(s) {
@@ -382,15 +521,92 @@ impl Context {
                     self.write(Instruction::LoadU(r, pos as _));
                     return r;
                 } else {
-                    let g = self.global(&Global::Var(s.to_owned()));
-                    let r = self.new_reg();
-                    self.write(Instruction::LoadGlobal(r, g as _));
+                    let (g, n) = self.global2(&Global::Var(s.to_owned()));
+                    let r = if !n {
+                        let r = self.new_reg();
+                        self.write(Instruction::LoadGlobal(r, g as _));
+                        r
+                    } else {
+                        let (s, _) = self.global(&Global::Str(s.to_owned()));
+                        let r2 = self.new_reg();
+                        self.write(Instruction::LoadStatic(r2, s as _));
+                        r2
+                    };
                     return r;
                 }
             }
             ExprKind::Function(name, params, body) => {
-                let r = self.compile_function(params, body, None);
+                let r = self.compile_function(params, body, name.clone());
                 return r;
+            }
+            ExprKind::New(expr) => match &expr.expr {
+                ExprKind::Call(value, args) => {
+                    for arg in args.iter() {
+                        let r = self.compile(arg, tail);
+                        self.write(Instruction::Push(r));
+                    }
+                    let value = self.compile(value, tail);
+                    let r = self.new_reg();
+                    self.write(Instruction::Construct(r, value, args.len() as _));
+                    r
+                }
+                _ => panic!("Call expected"),
+            },
+            ExprKind::While(cond, block) => {
+                let expr_check_bb_id = self.current_bb + 1;
+                self.write(Instruction::Goto(expr_check_bb_id as _));
+                self.move_forward();
+
+                let r = self.compile(cond, tail);
+                let break_point_bb = self.current_bb + 1;
+                self.move_forward();
+                let body_begin_id = self.current_bb + 1;
+                self.move_forward();
+                let ret = self.with_lci(
+                    LoopControlInfo {
+                        break_point: break_point_bb as _,
+                        continue_point: expr_check_bb_id as _,
+                    },
+                    |ctx| ctx.compile(block, tail),
+                );
+                self.write(Instruction::Goto(expr_check_bb_id as _));
+                let end_bb_id = self.current_bb + 1;
+                self.move_forward();
+                self.bbs[break_point_bb]
+                    .instructions
+                    .push(Instruction::Goto(end_bb_id as _));
+                self.bbs[expr_check_bb_id]
+                    .instructions
+                    .push(Instruction::ConditionalGoto(
+                        r,
+                        body_begin_id as _,
+                        end_bb_id as _,
+                    ));
+                ret
+            }
+            ExprKind::Call(value, args) => {
+                for arg in args.iter() {
+                    let r = self.compile(arg, tail);
+                    self.write(Instruction::Push(r));
+                }
+                let value = self.compile(value, tail);
+                let r = self.new_reg();
+                if tail {
+                    self.write(Instruction::TailCall(r, value, args.len() as _));
+                } else {
+                    self.write(Instruction::Call(r, value, args.len() as _));
+                }
+
+                r
+            }
+            ExprKind::Access(f, s) => {
+                let acc = self.compile_access(&ExprKind::Access(f.clone(), s.clone()));
+                self.access_get(acc)
+            }
+            ExprKind::This => {
+                let r = self.new_reg();
+                self.write(Instruction::LoadThis(r));
+                r
             }
             expr => panic!("{:?}", expr),
         }
@@ -416,9 +632,17 @@ impl Context {
             self.write(Instruction::LoadU(r, pos as _));
             return r;
         } else {
-            let g = self.global(&Global::Var(s.to_owned()));
-            let r = self.new_reg();
-            self.write(Instruction::LoadGlobal(r, g as _));
+            let (g, n) = self.global2(&Global::Var(s.to_owned()));
+            let r = if !n {
+                let r = self.new_reg();
+                self.write(Instruction::LoadGlobal(r, g as _));
+                r
+            } else {
+                let (s, _) = self.global(&Global::Str(s.to_owned()));
+                let r2 = self.new_reg();
+                self.write(Instruction::LoadStatic(r2, s as _));
+                r2
+            };
             return r;
         }
     }
@@ -427,7 +651,7 @@ impl Context {
         &mut self,
         params: &[String],
         e: &Box<Expr>,
-        vname: Option<&str>,
+        vname: Option<String>,
     ) -> u32 {
         let mut ctx = Context {
             g: self.g.clone(),
@@ -448,9 +672,11 @@ impl Context {
             cur_file: String::new(),
             regs: 0,
         };
-        for (idx, p) in params.iter().enumerate() {
+        for (_, p) in params.iter().enumerate() {
             ctx.stack += 1;
-            ctx.locals.insert(p.to_owned(), idx as i32);
+            let r = ctx.new_reg();
+            ctx.write(Instruction::Pop(r));
+            ctx.locals.insert(p.to_owned(), r as _);
         }
 
         let gid = ctx.g.borrow().table.len();
@@ -458,11 +684,14 @@ impl Context {
             ctx.g
                 .borrow_mut()
                 .globals
-                .insert(Global::Var(vname.unwrap().to_owned()), gid as i32);
+                .insert(Global::Var(vname.as_ref().unwrap().to_owned()), gid as i32);
         }
         ctx.g.borrow_mut().table.push(Global::Func(gid as i32, -1));
         ctx.compile(e, true);
         ctx.write(Instruction::Return(None));
+        jlight_vm::runtime::fusion::optimizer::simplify_cfg(&mut ctx.bbs);
+
+        ctx.finalize();
         //ctx.check_stack(s, "");
 
         ctx.g.borrow_mut().functions.push((
@@ -470,6 +699,7 @@ impl Context {
             ctx.pos.clone(),
             gid as i32,
             params.len() as i32,
+            vname.unwrap_or(String::from("<anonymous>")),
         ));
 
         if ctx.nenv > 0 {
@@ -515,6 +745,21 @@ impl Context {
             stack: 0,
         }
     }
+
+    pub fn finalize(&mut self) {
+        jlight_vm::runtime::fusion::optimizer::simplify_cfg(&mut self.bbs);
+        if self.bbs.last().is_some() && self.bbs.last().unwrap().instructions.is_empty() {
+            self.bbs.pop();
+        }
+        let mut bfc = BytecodeFunction::new();
+        for (i, bb) in self.bbs.iter().enumerate() {
+            bfc.block(i, regalloc::TypedIxVec::from_vec(bb.instructions.clone()));
+        }
+
+        regalloc(&mut bfc);
+        self.bbs = bfc.to_basic_blocks();
+        jlight_vm::runtime::fusion::optimizer::remove_bad_moves(&mut self.bbs);
+    }
 }
 
 pub fn compile(ast: Vec<Box<Expr>>) -> Context {
@@ -526,41 +771,6 @@ pub fn compile(ast: Vec<Box<Expr>>) -> Context {
 
     ctx.compile(&ast, false);
     ctx.write(Instruction::Return(None));
-    /*
-    if ctx.g.borrow().functions.len() != 0 || ctx.g.borrow().objects.len() != 0 {
-        let functions = ctx.g.borrow().functions.clone();
-        let ctxops = ctx.bbs.clone();
-        let _ctxpos = ctx.pos.clone();
-        let ops = vec![BasicBlock {
-            instructions: vec![Instruction::Goto(0)],
-        }];
-        let pos = vec![];
-        ctx.bbs = ops;
-        ctx.current_bb = 0;
-        ctx.pos = pos;
-
-        for (fops, fpos, gid, nargs) in functions.iter().rev() {
-            let mut g = ctx.g.borrow_mut();
-            g.table[*gid as usize] = Global::Func(ctx.bbs.len() as _, *nargs);
-
-            for bb in fops {
-                ctx.bbs.push(bb.clone());
-            }
-            let to = ctx.bbs.len();
-            ctx.bbs[0].instructions[0] = Instruction::Goto(to as u16 + 1);
-        }
-        for bb in ctxops.iter() {
-            ctx.bbs.push(bb.clone());
-        }
-    }
-
-    ctx.finish();*/
-    let mut bfc = BytecodeFunction::new();
-    for (i, bb) in ctx.bbs.iter().enumerate() {
-        bfc.block(i, regalloc::TypedIxVec::from_vec(bb.instructions.clone()));
-    }
-
-    regalloc(&mut bfc);
     ctx
 }
 
@@ -570,9 +780,9 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
     let mut m = Arc::new(Module::new());
     m.globals = Ptr::new(vec![ObjectPointer::null(); context.g.borrow().table.len()]);
 
-    for (blocks, _, gid, params) in context.g.borrow().functions.iter() {
+    for (blocks, _, gid, params, name) in context.g.borrow().functions.iter() {
         let f = Function {
-            name: Arc::new(String::new()),
+            name: Arc::new(name.clone()),
             argc: *params as i32,
             code: blocks.clone(),
             module: m.clone(),
@@ -611,4 +821,27 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
     m.globals.get().push(state.gc.allocate(object));
 
     m
+}
+
+pub fn disassemble_module(module: &Arc<Module>) {
+    for global in module.globals.get().iter() {
+        if global.is_tagged_number() {
+            continue;
+        }
+        if global.is_null() {
+            continue;
+        }
+        match global.get().value {
+            ObjectValue::Function(ref func) => {
+                println!("function {} (...)", func.name);
+                for (i, bb) in func.code.iter().enumerate() {
+                    println!("{}:", i);
+                    for (i, ins) in bb.instructions.iter().enumerate() {
+                        println!("  0x{:x}: {:?}", i, ins);
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
 }

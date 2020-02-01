@@ -16,7 +16,10 @@ pub struct Pool {
 }
 
 impl Drop for Pool {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        self.shutdown();
+        self.shutdown_num = 0;
+    }
 }
 
 impl Pool {
@@ -52,15 +55,19 @@ impl Pool {
             .collect::<Vec<_>>();
         tracers.into_iter().enumerate().for_each(|(idx, tracer)| {
             let recv = state.get_state().recv.clone();
-
+            let send = state.get_state().msend.clone();
             std::thread::Builder::new()
                 .name(format!("gc tracer-{}", idx))
                 .spawn(move || loop {
                     match recv.recv() {
                         Ok(Message::Execute) => {
                             tracer.trace();
+                            send.send(()).unwrap();
                         }
-                        Ok(Message::Shutdown) => break,
+                        Ok(Message::Shutdown) => {
+                            println!("shutdown");
+                            break;
+                        }
                         _ => panic!(),
                     }
                 })
@@ -76,7 +83,13 @@ impl Pool {
     fn get_state(&self) -> &State {
         self.init_lock.call_once(|| {
             let (send, recv) = crossbeam_channel::unbounded();
-            self.state.set(Some(State { send, recv }))
+            let (msend, mrecv) = crossbeam_channel::unbounded();
+            self.state.set(Some(State {
+                send,
+                recv,
+                msend,
+                mrecv,
+            }))
         });
 
         match unsafe { &*self.state.as_ptr() } {
@@ -89,6 +102,10 @@ impl Pool {
         let state = self.get_state();
         for _ in 0..self.shutdown_num {
             let _ = state.send.send(Message::Execute);
+        }
+
+        for _ in 0..self.shutdown_num {
+            state.mrecv.recv().unwrap();
         }
     }
 }
@@ -109,6 +126,9 @@ impl Tracer {
     pub fn trace(&self) {
         while let Some(pointer_pointer) = self.pop_job() {
             let pointer = pointer_pointer.get();
+            if pointer.is_null() {
+                continue;
+            }
             if pointer.is_marked() {
                 continue;
             }
@@ -160,4 +180,6 @@ enum Message {
 struct State {
     send: crossbeam_channel::Sender<Message>,
     recv: crossbeam_channel::Receiver<Message>,
+    msend: crossbeam_channel::Sender<()>,
+    mrecv: crossbeam_channel::Receiver<()>,
 }

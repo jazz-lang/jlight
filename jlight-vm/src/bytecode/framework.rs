@@ -68,7 +68,8 @@ impl BytecodeFunction {
         let instructions = self.instructions.iter().collect::<Vec<_>>();
         let mut basic_blocks = vec![];
         for block in self.blocks.iter() {
-            let insns = &instructions[block.start.get() as usize..block.len as usize];
+            let insns = &instructions
+                [block.start.get() as usize..block.start.get() as usize + block.len as usize];
             basic_blocks.push(BasicBlock {
                 instructions: insns.iter().map(|x| (**x).clone()).collect(),
             });

@@ -14,6 +14,7 @@ pub enum ObjectValue {
     ByteArray(Box<Vec<u8>>),
     Function(Box<Function>),
     Module(Arc<Module>),
+    Thread(std::thread::JoinHandle<ObjectPointer>),
 }
 
 impl ObjectValue {
@@ -53,7 +54,7 @@ pub struct Function {
     pub argc: i32,
     pub code: Vec<crate::bytecode::block::BasicBlock>,
     /// Native function pointer
-    pub native: Option<extern "C" fn(&Runtime, ObjectPointer, &[ObjectPointer]) -> ObjectPointer>,
+    pub native: Option<NativeFn>,
     pub module: Arc<Module>,
 }
 
@@ -74,6 +75,9 @@ unsafe impl Send for ObjectPointer {}
 
 impl ObjectPointer {
     pub fn is_false(&self, state: &RcState) -> bool {
+        if self.is_null() {
+            return true;
+        }
         if self.is_tagged_number() {
             self.number_value().unwrap() == 0.0
         } else {
@@ -196,6 +200,9 @@ impl ObjectPointer {
     }
 
     pub fn to_string(&self) -> Arc<String> {
+        if self.is_null() {
+            panic!();
+        }
         if self.is_tagged_number() {
             Arc::new(self.number_value().unwrap().to_string())
         } else {
@@ -215,6 +222,7 @@ impl ObjectPointer {
 
                     Arc::new(fmt_buf)
                 }
+                ObjectValue::Thread(_) => Arc::new(String::from("Thread")),
                 ObjectValue::File(_) => Arc::new(String::from("File")),
                 ObjectValue::ByteArray(ref array) => Arc::new(format!("{:?}", array)),
                 ObjectValue::Function(_) => Arc::new(String::from("Function")),
@@ -236,7 +244,7 @@ impl ObjectPointer {
                         Arc::new(String::from("{}"))
                     }
                 }
-                _ => unimplemented!(),
+                ObjectValue::Bool(x) => Arc::new(x.to_string()),
             }
         }
     }

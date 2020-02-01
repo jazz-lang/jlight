@@ -37,7 +37,7 @@ impl Context {
             stack: vec![],
             upvalues: vec![],
             return_register: None,
-            terminate_upon_return: true,
+            terminate_upon_return: false,
             module: Arc::new(Module {
                 labels: HashMap::with_hasher(FxBuildHasher::default()),
                 globals: Ptr::null(),
@@ -54,15 +54,26 @@ impl Context {
             context
                 .registers
                 .iter()
+                .filter(|x| !x.is_null())
                 .for_each(|pointer| cb(pointer.pointer()));
             context
                 .stack
                 .iter()
+                .filter(|x| !x.is_null())
                 .for_each(|pointer| cb(pointer.pointer()));
             context
                 .upvalues
                 .iter()
+                .filter(|x| !x.is_null())
                 .for_each(|pointer| cb(pointer.pointer()));
+            if context.module.globals.is_null() == false {
+                context
+                    .module
+                    .globals
+                    .get()
+                    .iter()
+                    .for_each(|pointer| cb(pointer.pointer()));
+            }
             current = context.parent.as_ref().map(|c| &**c);
         }
     }

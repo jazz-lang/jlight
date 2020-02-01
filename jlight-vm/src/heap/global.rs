@@ -51,11 +51,26 @@ impl GlobalCollector {
 
     pub fn collect(&self, state: &State) {
         self.collecting.store(true, Ordering::Release);
+        //let mut stack = vec![];
+        state.each_pointer(|object| {
+            self.pool.schedule(object);
+        });
         stop_the_world(state, |thread| {
             thread.each_pointer(|object| {
+                //stack.push(object);
                 self.pool.schedule(object);
             });
         });
+
+        /*while let Some(object) = stack.pop() {
+            if object.get().is_marked() {
+                continue;
+            }
+            object.get_mut().mark();
+            object.get().get().each_pointer(|object| {
+                stack.push(object);
+            });
+        }*/
         self.pool.run();
         self.sweep();
         self.collecting.store(false, Ordering::Release);
@@ -98,7 +113,7 @@ lazy_static::lazy_static! {
 }
 
 const GC_YIELD_MAX_ATTEMPT: u64 = 2;
-/// Stop-theWorld pause mechanism. During safepoint all threads running jlight vm bytecode are suspended.
+/// Stop-the-World pause mechanism. During safepoint all threads running jlight vm bytecode are suspended.
 pub fn safepoint(state: &State) {
     if state.gc.collecting.load(Ordering::Relaxed) {
         let mut blocking = STW.blocking.lock();
@@ -134,7 +149,7 @@ fn stop_the_world<F: FnMut(&JThread)>(state: &State, mut cb: F) {
     std::sync::atomic::fence(Ordering::SeqCst);
 
     let mut blocking = STW.blocking.lock();
-    *blocking = threads.len();
+    *blocking = threads.len() - 1;
     while *blocking > 0 {
         STW.cnd.wait(&mut blocking);
     }

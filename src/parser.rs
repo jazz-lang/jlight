@@ -79,21 +79,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_class(&mut self) -> EResult {
-        let pos1 = self.expect_token(TokenKind::Class)?.position;
-        let name = self.expect_identifier()?;
-        let impls = if self.token.is(TokenKind::Colon) || self.token.is(TokenKind::Implements) {
-            self.advance_token()?;
-            let impls = self.parse_expression()?;
-            Some(impls)
-        } else {
-            None
-        };
-        let block = self.parse_class_block()?;
-
-        Ok(expr!(ExprKind::Class(name, block, impls), pos1))
-    }
-
     fn parse_function(&mut self) -> EResult {
         let pos = self.expect_token(TokenKind::Fun)?.position;
         let name = if let TokenKind::Identifier(_) = &self.token.kind {
@@ -238,26 +223,6 @@ impl<'a> Parser<'a> {
         };
 
         Ok(expr!(ExprKind::If(cond, then_block, else_block), pos))
-    }
-
-    fn parse_class_block(&mut self) -> EResult {
-        let pos = self.expect_token(TokenKind::LBrace)?.position;
-        let mut exprs = vec![];
-        while !self.token.is(TokenKind::RBrace) && !self.token.is_eof() {
-            let expr = match self.token.kind {
-                TokenKind::Fun => self.parse_function()?,
-                TokenKind::Let | TokenKind::Var => self.parse_let()?,
-                _ => {
-                    return Err(MsgWithPos::new(
-                        pos,
-                        Msg::ExpectedClassElement("".to_owned()),
-                    ))
-                }
-            };
-            exprs.push(expr);
-        }
-        self.expect_token(TokenKind::RBrace)?;
-        Ok(expr!(ExprKind::Block(exprs), pos))
     }
 
     fn parse_block(&mut self) -> EResult {

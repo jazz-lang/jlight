@@ -4,6 +4,7 @@ pub enum Instruction {
     Store(u32, u32, u32),
     LoadInt(u32, u64),
     LoadNull(u32),
+    LoadBool(u32, bool),
     LoadNum(u32, u64),
     LoadConst(u32, u32),
     LoadGlobal(u32, u32),
@@ -119,9 +120,11 @@ impl Instruction {
             Instruction::LoadThis(r) => {
                 def.insert(vreg!(*r));
             }
-            Instruction::LoadStatic(r, x) => {
+            Instruction::LoadBool(r, _) => {
                 def.insert(vreg!(*r));
-                uce.insert(vreg!(*x));
+            }
+            Instruction::LoadStatic(r, _) => {
+                def.insert(vreg!(*r));
             }
             Instruction::LoadU(r, _) => {
                 def.insert(vreg!(*r));
@@ -235,6 +238,9 @@ impl Instruction {
             }
         }
         match self {
+            Instruction::LoadBool(r, _) => {
+                map!(def r);
+            }
             Instruction::Load(r0, r1, r2)
             | Instruction::Add(r0, r1, r2)
             | Instruction::Sub(r0, r1, r2)
@@ -275,8 +281,8 @@ impl Instruction {
             Instruction::LoadThis(r0) => {
                 map!(def r0);
             }
-            Instruction::LoadStatic(r0, r1) => {
-                map!(def r0 use r1);
+            Instruction::LoadStatic(r0, _) => {
+                map!(def r0 );
             }
             Instruction::LoadU(r0, _) => {
                 map!(def r0);
@@ -306,7 +312,7 @@ impl Instruction {
                 map!(use r0);
             }
             Instruction::Pop(r0) => {
-                map!(use r0);
+                map!(def r0);
             }
             Instruction::Move(r0, r1) => {
                 map!(def r0 use r1);

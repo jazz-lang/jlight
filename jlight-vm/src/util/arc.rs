@@ -142,12 +142,12 @@ use std::fmt;
 
 impl<T: fmt::Debug> fmt::Debug for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{:?}", **self)
     }
 }
 
 impl<T: fmt::Display> fmt::Display for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{}", **self)
     }
 }

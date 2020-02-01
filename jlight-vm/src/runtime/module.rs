@@ -23,3 +23,12 @@ pub struct ModuleRegistry {
     state: RcState,
     parsed: FxHashMap<String, ObjectPointer>,
 }
+
+impl ModuleRegistry {
+    pub fn new(state: RcState) -> Self {
+        Self {
+            state,
+            parsed: FxHashMap::with_hasher(fxhash::FxBuildHasher::default()),
+        }
+    }
+}
