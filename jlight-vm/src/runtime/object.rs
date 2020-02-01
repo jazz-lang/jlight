@@ -14,7 +14,7 @@ pub enum ObjectValue {
     ByteArray(Box<Vec<u8>>),
     Function(Box<Function>),
     Module(Arc<Module>),
-    Thread(std::thread::JoinHandle<ObjectPointer>),
+    Thread(Option<std::thread::JoinHandle<ObjectPointer>>),
 }
 
 impl ObjectValue {
@@ -42,17 +42,21 @@ macro_rules! push_collection {
     }};
 }
 
-pub type NativeFn = extern "C" fn(&Runtime, ObjectPointer, &[ObjectPointer]) -> ObjectPointer;
+pub type NativeFn = extern "C" fn(
+    &Runtime,
+    ObjectPointer,
+    &[ObjectPointer],
+) -> Result<ObjectPointer, ObjectPointer>;
 
 use super::Runtime;
-
+use crate::util::ptr::Ptr;
 pub struct Function {
     /// function name
     pub name: Arc<String>,
     /// captured values from parent scope
     pub upvalues: Vec<ObjectPointer>,
     pub argc: i32,
-    pub code: Vec<crate::bytecode::block::BasicBlock>,
+    pub code: Ptr<Vec<crate::bytecode::block::BasicBlock>>,
     /// Native function pointer
     pub native: Option<NativeFn>,
     pub module: Arc<Module>,
@@ -629,7 +633,7 @@ pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> ObjectPointer
         argc,
         upvalues: vec![],
         native: Some(fun),
-        code: vec![],
+        code: Ptr::null(),
         module: Arc::new(Module::new()),
         name: Arc::new(String::new()),
     };
@@ -639,4 +643,11 @@ pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> ObjectPointer
         state.function_prototype,
     );
     state.gc.allocate(object)
+}
+
+use std::fmt;
+impl fmt::Debug for ObjectPointer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
 }

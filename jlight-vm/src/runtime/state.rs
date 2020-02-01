@@ -19,6 +19,7 @@ pub struct State {
     pub number_prototype: ObjectPointer,
     pub module_prototype: ObjectPointer,
     pub string_prototype: ObjectPointer,
+    pub thread_prototype: ObjectPointer,
     pub static_variables: AHashMap<String, ObjectPointer>,
 }
 
@@ -39,6 +40,7 @@ impl State {
         let number_prototype = gc.allocate(Object::new(ObjectValue::None));
         let module_prototype = gc.allocate(Object::new(ObjectValue::None));
         let string_prototype = gc.allocate(Object::new(ObjectValue::None));
+        let thread_prototype = gc.allocate(Object::new(ObjectValue::None));
         let map = map!(ahash
             "Object".to_owned() => object_prototype,
             "Boolean".to_owned() => boolean_prototype,
@@ -46,7 +48,8 @@ impl State {
             "Function".to_owned() => function_prototype,
             "Module".to_owned() => module_prototype,
             "Array".to_owned() => array_prototype,
-            "String".to_owned() => string_prototype
+            "String".to_owned() => string_prototype,
+            "Thread".to_owned() => thread_prototype
         );
         Self {
             threads: Threads::new(),
@@ -54,6 +57,7 @@ impl State {
             nil_prototype,
             boolean_prototype,
             array_prototype,
+            thread_prototype,
             function_prototype,
             object_prototype,
             number_prototype,

@@ -5,19 +5,19 @@ use jlight::parser::*;
 use jlight::reader::*;
 use jlight_vm::runtime::*;
 fn main() {
+    let start_time = std::time::Instant::now();
     let mut ast = vec![];
     let r = Reader::from_string(
         "
-
-
-function Point(x,y) {
-    self.x = x
-    self.y = y
-    return self
+function foo() {
+    io.writeln(\"Hello from thread!\")
+    return 42
+   
 }
 
-var p = new Point(2,3)
-io.writeln(p.x)
+var th = new Thread(foo)
+
+io.writeln(th.join())
 ",
     );
     let mut p = Parser::new(r, &mut ast);
@@ -26,7 +26,17 @@ io.writeln(p.x)
     ctx.finalize();
     let state = jlight_vm::util::arc::Arc::new(jlight_vm::runtime::state::State::new());
     let module = jlight::codegen::module_from_ctx(&ctx, &state);
-    let rt = Runtime::new();
     jlight::codegen::disassemble_module(&module);
-    rt.run_function(module.globals.get().last().unwrap().clone());
+    let execution_time = std::time::Instant::now();
+    RUNTIME.state.threads.attach_current_thread();
+    RUNTIME.run_function(module.globals.get().last().unwrap().clone());
+    let end = start_time.elapsed();
+    let exec = execution_time.elapsed();
+    println!(
+        "Program done in {}ms ({}ns) and code executed in {}ms ({}ns)",
+        end.as_millis(),
+        end.as_nanos(),
+        exec.as_millis(),
+        exec.as_nanos()
+    )
 }

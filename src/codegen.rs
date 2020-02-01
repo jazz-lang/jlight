@@ -157,7 +157,7 @@ impl Context {
     }
 
     pub fn global2(&mut self, global: &Global) -> (i32, bool) {
-        let mut g = self.g.borrow_mut();
+        let g = self.g.borrow_mut();
         return match g.globals.get(global).cloned() {
             Some(g) => (g.clone(), false),
             None => {
@@ -360,6 +360,13 @@ impl Context {
                 self.write(Instruction::Mul(r3, r1, r2));
                 r3
             }
+            "&&" => {
+                let r1 = self.compile(e1, tail);
+                let r2 = self.compile(e2, tail);
+                let r3 = self.new_reg();
+                self.write(Instruction::BoolAnd(r3, r1, r2));
+                r3
+            }
             _ => unimplemented!(),
         }
     }
@@ -421,7 +428,7 @@ impl Context {
             }
             ExprKind::Return(e) => match e {
                 Some(e) => {
-                    let r = self.compile(e, false);
+                    let r = self.compile(e, true);
                     self.write(Instruction::Return(Some(r)));
                     self.move_forward();
                     r
@@ -541,7 +548,7 @@ impl Context {
             }
             ExprKind::New(expr) => match &expr.expr {
                 ExprKind::Call(value, args) => {
-                    for arg in args.iter() {
+                    for arg in args.iter().rev() {
                         let r = self.compile(arg, tail);
                         self.write(Instruction::Push(r));
                     }
@@ -589,13 +596,27 @@ impl Context {
                     let r = self.compile(arg, tail);
                     self.write(Instruction::Push(r));
                 }
+                match &value.expr {
+                    ExprKind::Access(object, fields) => {
+                        let this = self.compile(object, tail);
+                        let field = self.new_reg();
+                        let (s, _) = self.global(&Global::Str(fields.to_owned()));
+                        let sr = self.new_reg();
+                        self.write(Instruction::LoadGlobal(sr, s as _));
+                        self.write(Instruction::Load(field, this, sr));
+                        let r = self.new_reg();
+                        self.write(Instruction::VirtCall(r, field, this, args.len() as _));
+                        return r;
+                    }
+                    _ => (),
+                }
                 let value = self.compile(value, tail);
                 let r = self.new_reg();
-                if tail {
-                    self.write(Instruction::TailCall(r, value, args.len() as _));
-                } else {
-                    self.write(Instruction::Call(r, value, args.len() as _));
-                }
+                //if tail {
+                //  self.write(Instruction::TailCall(r, value, args.len() as _));
+                //} else {
+                self.write(Instruction::Call(r, value, args.len() as _));
+                //}
 
                 r
             }
@@ -672,7 +693,7 @@ impl Context {
             cur_file: String::new(),
             regs: 0,
         };
-        for (_, p) in params.iter().enumerate() {
+        for p in params.iter().rev() {
             ctx.stack += 1;
             let r = ctx.new_reg();
             ctx.write(Instruction::Pop(r));
@@ -784,14 +805,16 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
         let f = Function {
             name: Arc::new(name.clone()),
             argc: *params as i32,
-            code: blocks.clone(),
+            code: Ptr::new(blocks.clone()),
             module: m.clone(),
             native: None,
             upvalues: vec![],
         };
         let object =
             Object::with_prototype(ObjectValue::Function(Box::new(f)), state.function_prototype);
-        m.globals.get()[*gid as usize] = state.gc.allocate(object);
+        let object = state.gc.allocate(object);
+        //let prototype = Object::with_prototype(ObjectValue::None, state.object_prototype);
+        m.globals.get()[*gid as usize] = object;
     }
 
     for (i, g) in context.g.borrow().table.iter().enumerate() {
@@ -809,7 +832,7 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
     let entry = Function {
         name: Arc::new(String::from("main")),
         argc: 0,
-        code: context.bbs.clone(),
+        code: Ptr::new(context.bbs.clone()),
         module: m.clone(),
         native: None,
         upvalues: vec![],

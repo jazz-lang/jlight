@@ -17,16 +17,19 @@ pub struct Runtime {
     pub registry: crate::util::arc::Arc<ModuleRegistry>,
 }
 
+lazy_static::lazy_static! {
+    pub static ref RUNTIME: Arc<Runtime> = Arc::new(Runtime::new());
+}
+
 impl Runtime {
     pub fn new() -> Self {
         let mut state = Arc::new(State::new());
-        state.threads.attach_current_thread();
         builtins::register_builtins(&mut state);
         let registry = Arc::new(ModuleRegistry::new(state.clone()));
         Self { state, registry }
     }
 
-    pub fn run_function(&self, function: ObjectPointer) {
+    pub fn run_function(&self, function: ObjectPointer) -> ObjectPointer {
         if function.is_tagged_number() {
             panic!("not a function");
         }
@@ -38,7 +41,7 @@ impl Runtime {
                 context.terminate_upon_return = true;
                 context.upvalues = func.upvalues.clone();
                 thread.get().push_context(context);
-                self.run(thread.get());
+                return self.run(thread.get());
             }),
             _ => panic!("not a function"),
         }

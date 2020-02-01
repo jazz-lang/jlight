@@ -4,7 +4,7 @@ pub extern "C" fn io_writeln(
     _: &Runtime,
     _: ObjectPointer,
     args: &[ObjectPointer],
-) -> ObjectPointer {
+) -> Result<ObjectPointer, ObjectPointer> {
     for (i, arg) in args.iter().enumerate() {
         print!("{}", arg.to_string());
         if i != args.len() - 1 {
@@ -12,17 +12,21 @@ pub extern "C" fn io_writeln(
         }
     }
     println!();
-    ObjectPointer::number(args.len() as f64)
+    Ok(ObjectPointer::number(args.len() as f64))
 }
 
-pub extern "C" fn io_write(_: &Runtime, _: ObjectPointer, args: &[ObjectPointer]) -> ObjectPointer {
+pub extern "C" fn io_write(
+    _: &Runtime,
+    _: ObjectPointer,
+    args: &[ObjectPointer],
+) -> Result<ObjectPointer, ObjectPointer> {
     for (i, arg) in args.iter().enumerate() {
         print!("{}", arg.to_string());
         if i != args.len() - 1 {
             print!(" ");
         }
     }
-    ObjectPointer::number(args.len() as f64)
+    Ok(ObjectPointer::number(args.len() as f64))
 }
 
 pub(super) fn register_io(state: &mut RcState) {

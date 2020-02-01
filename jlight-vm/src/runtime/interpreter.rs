@@ -29,7 +29,7 @@ macro_rules! catch {
 }
 
 impl Runtime {
-    pub fn run(&self, thread: &Arc<JThread>) {
+    pub fn run(&self, thread: &Arc<JThread>) -> ObjectPointer {
         let mut context: &mut Context;
         let mut index;
         let mut bindex;
@@ -53,7 +53,12 @@ impl Runtime {
                 Instruction::Safepoint => safepoint(&self.state),
                 Instruction::Return(value) => {
                     if context.terminate_upon_return {
-                        break 'exec_loop;
+                        if let Some(value) = value {
+                            let x = context.get_register(value);
+                            return x;
+                        } else {
+                            return self.allocate_null();
+                        }
                     }
                     let object = if let Some(value) = value {
                         context.get_register(value)
@@ -68,19 +73,12 @@ impl Runtime {
                     }
 
                     if thread.pop_context() {
-                        break 'exec_loop;
+                        return self.allocate_null();
                     }
                     reset_context!(thread, context, index, bindex);
                     safepoint(&self.state);
                 }
                 Instruction::TailCall(return_register, function, argc) => {
-                    let mut new_ctx = Context::new();
-                    new_ctx.return_register = Some(return_register);
-                    for _ in 0..argc {
-                        new_ctx
-                            .stack
-                            .push(context.stack.pop().unwrap_or(self.state.nil_prototype));
-                    }
                     let function = context.get_register(function);
                     if function.is_tagged_number() {
                         unimplemented!() // TODO: try/catch support
@@ -88,19 +86,32 @@ impl Runtime {
                         match function.get().value {
                             ObjectValue::Function(ref function) => {
                                 if let None = function.native {
+                                    let mut new_stack = vec![];
+                                    for _ in 0..argc {
+                                        new_stack.push(
+                                            context.stack.pop().unwrap_or(self.state.nil_prototype),
+                                        )
+                                    }
                                     thread.pop_context();
+                                    let mut new_ctx = Context::new();
+                                    new_ctx.stack = new_stack;
                                     new_ctx.code = function.code.clone();
                                     new_ctx.bp = 0;
                                     new_ctx.module = function.module.clone();
                                     new_ctx.upvalues =
                                         function.upvalues.iter().map(|x| x.clone()).collect();
                                     thread.push_context(new_ctx);
-
                                     reset_context!(thread, context, index, bindex);
                                 } else if let Some(native) = function.native {
+                                    let mut args = vec![];
+                                    for _ in 0..argc {
+                                        args.push(
+                                            context.stack.pop().unwrap_or(self.state.nil_prototype),
+                                        )
+                                    }
                                     context.set_register(
                                         return_register,
-                                        native(self, ObjectPointer::null(), &new_ctx.stack),
+                                        native(self, ObjectPointer::null(), &args).unwrap(),
                                     );
                                 }
                             }
@@ -135,7 +146,8 @@ impl Runtime {
                                 } else if let Some(native) = function.native {
                                     context.set_register(
                                         return_register,
-                                        native(self, ObjectPointer::null(), &new_ctx.stack),
+                                        native(self, ObjectPointer::null(), &new_ctx.stack)
+                                            .unwrap(),
                                     );
                                 }
                             }
@@ -180,7 +192,8 @@ impl Runtime {
                             for _ in 0..argc {
                                 args.push(context.stack.pop().unwrap_or(self.state.nil_prototype));
                             }
-                            context.set_register(return_register, native(self, this, &args));
+                            context
+                                .set_register(return_register, native(self, this, &args).unwrap());
                         }
                     } else {
                         let initializer =
@@ -226,7 +239,7 @@ impl Runtime {
                                             }
                                             context.set_register(
                                                 return_register,
-                                                native(self, this, &args),
+                                                native(self, this, &args).unwrap(),
                                             );
                                         }
                                     }
@@ -265,11 +278,11 @@ impl Runtime {
                                 } else if let Some(native) = function.native {
                                     context.set_register(
                                         return_register,
-                                        native(self, this, &new_ctx.stack),
+                                        native(self, this, &new_ctx.stack).unwrap(),
                                     );
                                 }
                             }
-                            _ => unimplemented!(), // TODO try/catch support
+                            _ => panic!("{:?}", function), // TODO try/catch support
                         }
                     }
                     safepoint(&self.state);
@@ -781,8 +794,7 @@ impl Runtime {
     }
 
     pub fn allocate_null(&self) -> ObjectPointer {
-        let object = Object::with_prototype(ObjectValue::None, self.state.nil_prototype);
-        self.state.gc.allocate(object)
+        self.state.nil_prototype
     }
 
     pub fn allocate_string(&self, s: Arc<String>) -> ObjectPointer {

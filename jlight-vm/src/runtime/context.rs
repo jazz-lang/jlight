@@ -23,7 +23,7 @@ pub struct Context {
     pub return_register: Option<u32>,
     pub terminate_upon_return: bool,
     pub module: Arc<Module>,
-    pub code: Vec<BasicBlock>,
+    pub code: Ptr<Vec<BasicBlock>>,
     pub parent: Option<Box<Context>>,
 }
 use fxhash::FxBuildHasher;
@@ -42,7 +42,7 @@ impl Context {
                 labels: HashMap::with_hasher(FxBuildHasher::default()),
                 globals: Ptr::null(),
             }),
-            code: vec![],
+            code: Ptr::null(),
             parent: None,
             this: ObjectPointer::null(),
         }
