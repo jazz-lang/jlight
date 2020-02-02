@@ -6,13 +6,22 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 thread_local! {
-    pub static THREAD: Ptr<Arc<JThread>> = Ptr::new(JThread::new());
+    pub static THREAD: Ptr<Arc<JThread>> = {
+        let thread = JThread::new();
+        thread.local_data_mut().native = true;
+        Ptr::new(thread)
+    };
 }
 
+/// Thread local data in JLight.
 pub struct LocalData {
-    pub context: Box<Context>,
+    pub context: Ptr<Context>,
+    pub native: bool,
 }
 
+/// JLight native thread.
+///
+/// Multiple instances of `JThread` may be used in single-thread.
 pub struct JThread {
     pub local_data: Ptr<LocalData>,
 }
@@ -21,7 +30,8 @@ impl JThread {
     pub fn new() -> Arc<JThread> {
         Arc::new(JThread {
             local_data: Ptr::new(LocalData {
-                context: Box::new(Context::new()),
+                context: Ptr::new(Context::new()),
+                native: false,
             }),
         })
     }
@@ -32,6 +42,7 @@ impl JThread {
     pub fn local_data_mut(&self) -> &mut LocalData {
         self.local_data.get()
     }
+
     pub fn pop_context(&self) -> bool {
         let local_data = self.local_data_mut();
         if let Some(parent) = local_data.context.parent.take() {
@@ -43,7 +54,7 @@ impl JThread {
     }
 
     pub fn push_context(&self, context: Context) {
-        let mut boxed = Box::new(context);
+        let mut boxed = Ptr::new(context);
         let local_data = self.local_data_mut();
         let target = &mut local_data.context;
 
@@ -53,11 +64,15 @@ impl JThread {
     }
 
     pub fn context_mut(&self) -> &mut Context {
-        &mut self.local_data_mut().context
+        self.local_data_mut().context.get()
+    }
+
+    pub fn context_ptr(&self) -> Ptr<Context> {
+        self.local_data_mut().context
     }
 
     pub fn context(&self) -> &Context {
-        &self.local_data().context
+        self.local_data().context.get()
     }
 
     pub fn each_pointer<F: FnMut(super::object::ObjectPointerPointer)>(&self, cb: F) {
@@ -68,6 +83,12 @@ impl JThread {
 
 unsafe impl Sync for JThread {}
 unsafe impl Send for JThread {}
+
+impl Drop for JThread {
+    fn drop(&mut self) {
+        unsafe { std::ptr::drop_in_place(self.local_data.0) }
+    }
+}
 
 pub struct Threads {
     pub threads: Mutex<Vec<Arc<JThread>>>,

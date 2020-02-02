@@ -820,9 +820,9 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
             module: m.clone(),
             native: None,
             upvalues: vec![],
+            hotness: 0,
         };
-        let object =
-            Object::with_prototype(ObjectValue::Function(Box::new(f)), state.function_prototype);
+        let object = Object::with_prototype(ObjectValue::Function(f), state.function_prototype);
         let object = state.gc.allocate(object);
         //let prototype = Object::with_prototype(ObjectValue::None, state.object_prototype);
         m.globals.get()[*gid as usize] = object;
@@ -847,11 +847,9 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
         module: m.clone(),
         native: None,
         upvalues: vec![],
+        hotness: 0,
     };
-    let object = Object::with_prototype(
-        ObjectValue::Function(Box::new(entry)),
-        state.function_prototype,
-    );
+    let object = Object::with_prototype(ObjectValue::Function(entry), state.function_prototype);
     m.globals.get().push(state.gc.allocate(object));
 
     m

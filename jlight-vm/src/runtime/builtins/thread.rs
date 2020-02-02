@@ -11,7 +11,7 @@ pub extern "C" fn thread_init(
     if let ObjectValue::Function(ref f) = function.get().value {
         if !f.upvalues.is_empty() {
             return Err(rt.allocate_string(Arc::new(
-                "Thread functions cannot capture variables".to_owned(),
+                "Thread function cannot capture variables".to_owned(),
             )));
         }
     } else {

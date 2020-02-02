@@ -9,31 +9,14 @@ fn main() {
     let mut ast = vec![];
     let r = Reader::from_string(
         " 
-var m1 = new Array(
-    new Array(1,2,3),
-    new Array(4,5,6),
-    new Array(7,8,9)
-)
-
-var m2 = new Array(
-    new Array(10,11,12),
-    new Array(13,14,15),
-    new Array(16,17,18)
-)
-
-var m3 = new Array(
-    new Array(m1[0][0] * m2[0][0],m1[0][1] * m2[0][1],m1[0][2] * m2[0][2]),
-    new Array(m1[1][0] * m2[1][0],m1[0][1] * m2[1][1],m1[0][2] * m2[1][2]),
-    new Array(m1[2][0] * m2[2][0],m1[0][1] * m2[2][1],m1[0][2] * m2[2][2]),
-)
-var m4 = new Array(
-    new Array(m3[0][0] * m2[0][0],m3[0][1] * m2[0][1],m3[0][2] * m2[0][2]),
-    new Array(m3[1][0] * m2[1][0],m3[0][1] * m2[1][1],m3[0][2] * m2[1][2]),
-    new Array(m3[2][0] * m2[2][0],m3[0][1] * m2[2][1],m3[0][2] * m2[2][2]),
-)
-
-
-io.writeln(m4)
+function fac(x) {
+    if x < 1 {
+        return 1
+    } else {
+        return fac(x - 1) *x
+    }
+}
+fac(10)
 ",
     );
     let mut p = Parser::new(r, &mut ast);

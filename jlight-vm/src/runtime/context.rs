@@ -24,7 +24,8 @@ pub struct Context {
     pub terminate_upon_return: bool,
     pub module: Arc<Module>,
     pub code: Ptr<Vec<BasicBlock>>,
-    pub parent: Option<Box<Context>>,
+    pub parent: Option<Ptr<Context>>,
+    pub function: ObjectPointer,
 }
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
@@ -45,6 +46,7 @@ impl Context {
             code: Ptr::null(),
             parent: None,
             this: ObjectPointer::null(),
+            function: ObjectPointer::null(),
         }
     }
 

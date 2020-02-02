@@ -149,7 +149,12 @@ fn stop_the_world<F: FnMut(&JThread)>(state: &State, mut cb: F) {
     std::sync::atomic::fence(Ordering::SeqCst);
 
     let mut blocking = STW.blocking.lock();
-    *blocking = threads.len() - 1;
+
+    let native_threads_count =
+        threads
+            .iter()
+            .fold(0, |c, x| if x.local_data().native { c + 1 } else { c });
+    *blocking = native_threads_count - 1;
     while *blocking > 0 {
         STW.cnd.wait(&mut blocking);
     }

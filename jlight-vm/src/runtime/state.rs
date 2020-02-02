@@ -27,7 +27,7 @@ impl State {
     pub fn new() -> Self {
         let gc = GlobalCollector {
             heap: Mutex::new(vec![]),
-            threshold: AtomicUsize::new(4096),
+            threshold: AtomicUsize::new(4096 * 10),
             bytes_allocated: AtomicUsize::new(0),
             pool: Pool::new(num_cpus::get() / 2),
             collecting: AtomicBool::new(false),

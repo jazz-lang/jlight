@@ -1,3 +1,4 @@
+use super::fusion::tracing_interpreter::*;
 use super::string_pool::{intern, str};
 use super::threads::*;
 use super::*;
@@ -8,7 +9,7 @@ use context::*;
 use object::*;
 macro_rules! reset_context {
     ($process:expr, $context:ident, $index:ident,$bindex: ident) => {{
-        $context = $process.context_mut();
+        $context = $process.context_ptr();
         $index = $context.ip;
         $bindex = $context.bp;
     }};
@@ -29,8 +30,8 @@ macro_rules! catch {
 }
 
 impl Runtime {
-    pub fn run(&self, thread: &Arc<JThread>) -> ObjectPointer {
-        let mut context: &mut Context;
+    pub fn run(&self, thread: &mut Arc<JThread>) -> ObjectPointer {
+        let mut context: crate::util::ptr::Ptr<Context>;
         let mut index;
         let mut bindex;
         let mut instruction;
@@ -128,21 +129,70 @@ impl Runtime {
                             .stack
                             .push(context.stack.pop().unwrap_or(self.state.nil_prototype));
                     }
-                    let function = context.get_register(function);
-                    if function.is_tagged_number() {
+                    let function_object = context.get_register(function);
+                    if function_object.is_tagged_number() {
                         unimplemented!() // TODO: try/catch support
                     } else {
-                        match function.get().value {
-                            ObjectValue::Function(ref function) => {
+                        match function_object.get_mut().value {
+                            ObjectValue::Function(ref mut function) => {
                                 if let None = function.native {
-                                    new_ctx.code = function.code.clone();
-                                    new_ctx.bp = 0;
-                                    new_ctx.module = function.module.clone();
-                                    new_ctx.upvalues =
-                                        function.upvalues.iter().map(|x| x.clone()).collect();
-                                    thread.push_context(new_ctx);
+                                    if function.hotness >= 10 {
+                                        let mut info =
+                                            super::fusion::tracing_interpreter::TRACE_INFO
+                                                .with(|x| x.clone());
+                                        if info
+                                            .entry(function_object)
+                                            .or_insert(TraceInfo {
+                                                invocations: 0,
+                                                trace: vec![
+                                                    super::fusion::instruction::FusionBasicBlock {
+                                                        instructions: vec![]
+                                                    };
+                                                    context.code.len()
+                                                ],
+                                                current_block: 0,
+                                                complete: std::collections::HashSet::new(),
+                                            })
+                                            .complete
+                                            .len()
+                                            == function.code.len()
+                                        {
+                                            new_ctx.code = function.code.clone();
+                                            new_ctx.function = function_object;
+                                            new_ctx.bp = 0;
+                                            function.hotness += 1;
+                                            new_ctx.module = function.module.clone();
+                                            new_ctx.upvalues = function
+                                                .upvalues
+                                                .iter()
+                                                .map(|x| x.clone())
+                                                .collect();
+                                            thread.push_context(new_ctx);
 
-                                    enter_context!(thread, context, index, bindex);
+                                            enter_context!(thread, context, index, bindex);
+                                            continue;
+                                        }
+                                        let (result, _) = self
+                                            .run_function_with_thread_and_tracing(
+                                                function_object,
+                                                thread,
+                                                &mut *info,
+                                                &new_ctx.stack,
+                                            );
+                                        drop(info);
+                                        context.set_register(return_register, result);
+                                    } else {
+                                        new_ctx.code = function.code.clone();
+                                        new_ctx.function = function_object;
+                                        new_ctx.bp = 0;
+                                        function.hotness += 1;
+                                        new_ctx.module = function.module.clone();
+                                        new_ctx.upvalues =
+                                            function.upvalues.iter().map(|x| x.clone()).collect();
+                                        thread.push_context(new_ctx);
+
+                                        enter_context!(thread, context, index, bindex);
+                                    }
                                 } else if let Some(native) = function.native {
                                     context.set_register(
                                         return_register,
@@ -157,7 +207,8 @@ impl Runtime {
                     safepoint(&self.state);
                 }
                 Instruction::Push(r) => {
-                    context.stack.push(context.get_register(r));
+                    let r = context.get_register(r);
+                    context.stack.push(r);
                 }
                 Instruction::Pop(r) => {
                     let v = context.stack.pop().unwrap_or(self.state.nil_prototype);
@@ -260,17 +311,18 @@ impl Runtime {
                             .push(context.stack.pop().unwrap_or(self.state.nil_prototype));
                     }
                     let this = context.get_register(this);
-                    let function = context.get_register(function);
-                    if function.is_tagged_number() {
+                    let function_object = context.get_register(function);
+                    if function_object.is_tagged_number() {
                         unimplemented!() // TODO: try/catch support
                     } else {
-                        match function.get().value {
+                        match function_object.get().value {
                             ObjectValue::Function(ref function) => {
                                 if let None = function.native {
                                     new_ctx.code = function.code.clone();
                                     new_ctx.bp = 0;
                                     new_ctx.module = function.module.clone();
                                     new_ctx.this = this;
+                                    new_ctx.function = function_object;
                                     new_ctx.upvalues =
                                         function.upvalues.iter().map(|x| x.clone()).collect();
                                     thread.push_context(new_ctx);

@@ -4,17 +4,33 @@ use crate::util::arc::Arc;
 use crate::util::tagged_pointer::*;
 use ahash::AHashMap;
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 pub enum ObjectValue {
     None,
     Number(f64),
     Bool(bool),
     String(Arc<String>),
-    File(Box<fs::File>),
-    Array(Box<Vec<ObjectPointer>>),
-    ByteArray(Box<Vec<u8>>),
-    Function(Box<Function>),
+    File(fs::File),
+    Array(Vec<ObjectPointer>),
+    ByteArray(Vec<u8>),
+    Function(Function),
     Module(Arc<Module>),
     Thread(Option<std::thread::JoinHandle<ObjectPointer>>),
+}
+
+pub struct Object {
+    pub prototype: ObjectPointer,
+    pub attributes: TaggedPointer<AHashMap<Arc<String>, ObjectPointer>>,
+    pub value: ObjectValue,
+    pub marked: AtomicBool,
+}
+
+#[derive(Clone, Copy)]
+pub struct ObjectPointer {
+    pub raw: TaggedPointer<Object>,
+}
+pub struct ObjectPointerPointer {
+    pub raw: *const ObjectPointer,
 }
 
 impl ObjectValue {
@@ -60,19 +76,11 @@ pub struct Function {
     /// Native function pointer
     pub native: Option<NativeFn>,
     pub module: Arc<Module>,
+    pub hotness: usize,
 }
 
 /// The bit to set for tagged integers.
 pub const INTEGER_BIT: usize = 0;
-
-pub struct ObjectPointerPointer {
-    pub raw: *const ObjectPointer,
-}
-
-#[derive(Clone, Copy)]
-pub struct ObjectPointer {
-    pub raw: TaggedPointer<Object>,
-}
 
 unsafe impl Sync for ObjectPointer {}
 unsafe impl Send for ObjectPointer {}
@@ -104,7 +112,7 @@ impl ObjectPointer {
         if self.is_tagged_number() {
             true
         } else {
-            self.get().marked
+            self.get().marked.load(Ordering::Relaxed)
         }
     }
     pub fn prototype(&self, state: &State) -> Option<ObjectPointer> {
@@ -181,7 +189,7 @@ impl ObjectPointer {
             unreachable!()
         }
         let x = self.get_mut();
-        x.marked = true;
+        x.marked.store(true, Ordering::Release);
     }
 
     pub fn unmark(&self) {
@@ -189,7 +197,7 @@ impl ObjectPointer {
             unreachable!()
         }
         let x = self.get_mut();
-        x.marked = false;
+        x.marked.store(true, Ordering::Release);
     }
 
     pub fn as_string(&self) -> Result<&Arc<String>, String> {
@@ -315,13 +323,6 @@ impl ObjectPointer {
     }
 }
 
-pub struct Object {
-    pub prototype: ObjectPointer,
-    pub attributes: TaggedPointer<AHashMap<Arc<String>, ObjectPointer>>,
-    pub value: ObjectValue,
-    pub marked: bool,
-}
-
 impl Object {
     /// Returns a new object with the given value.
     pub fn new(value: ObjectValue) -> Object {
@@ -329,7 +330,7 @@ impl Object {
             prototype: ObjectPointer::null(),
             attributes: TaggedPointer::null(),
             value,
-            marked: false,
+            marked: AtomicBool::new(false),
         }
     }
 
@@ -343,7 +344,7 @@ impl Object {
             prototype,
             attributes: TaggedPointer::null(),
             value,
-            marked: false,
+            marked: AtomicBool::new(false),
         }
     }
     pub fn each_pointer<F: FnMut(ObjectPointerPointer)>(&self, mut callback: F) {
@@ -636,12 +637,10 @@ pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> ObjectPointer
         code: Ptr::null(),
         module: Arc::new(Module::new()),
         name: Arc::new(String::new()),
+        hotness: 0,
     };
 
-    let object = Object::with_prototype(
-        ObjectValue::Function(Box::new(function)),
-        state.function_prototype,
-    );
+    let object = Object::with_prototype(ObjectValue::Function(function), state.function_prototype);
     state.gc.allocate(object)
 }
 

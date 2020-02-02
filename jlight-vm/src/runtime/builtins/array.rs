@@ -12,7 +12,7 @@ pub extern "C" fn array_init(
             }
         }
         x => {
-            *x = ObjectValue::Array(Box::new(args.to_vec()));
+            *x = ObjectValue::Array(args.to_vec());
         }
     }
     Ok(x)
