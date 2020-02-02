@@ -57,14 +57,7 @@ impl Runtime {
             panic!("Not a function");
         }
         match function.get().value {
-            ObjectValue::Function(ref func) => {
-                let mut context = context::Context::new();
-                context.code = func.code.clone();
-                context.module = func.module.clone();
-                context.terminate_upon_return = true;
-                context.function = function;
-                context.upvalues = func.upvalues.clone();
-                thread.push_context(context);
+            ObjectValue::Function(_) => {
                 return self.run(thread);
             }
             _ => panic!("not a function"),
@@ -90,7 +83,11 @@ impl Runtime {
                 context.module = func.module.clone();
                 context.terminate_upon_return = true;
                 context.function = function;
+                context.terminate_upon_return = true;
                 context.stack = args.to_vec();
+                //for (i, arg) in context.stack.iter().enumerate() {
+                //println!("arg {} {}", i, arg.to_string());
+                //}
                 context.upvalues = func.upvalues.clone();
                 thread.push_context(context);
                 return self.run_tracing(thread, trace_info);

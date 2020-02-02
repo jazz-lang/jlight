@@ -60,6 +60,10 @@ impl TraceInfo {
             self.trace[self.current_block].instructions.push(x);
         }
     }
+    pub fn complete(&self) -> bool {
+        let x = self.trace.iter().all(|x| !x.instructions.is_empty());
+        x
+    }
 
     pub fn move_forward(&mut self) {
         self.current_block += 1;
@@ -113,9 +117,11 @@ impl Runtime {
             current_block: 0,
             complete: HashSet::new(),
         });
+        println!("trace loop");
         'exec_loop: loop {
             let block: &BasicBlock = unsafe { context.code.get_unchecked(bindex) };
             instruction = block.instructions[index].clone();
+            //println!("{:?}", instruction);
             index += 1;
             match instruction {
                 Instruction::LoadInt(r, val) => {
@@ -151,6 +157,7 @@ impl Runtime {
                         }
                         if let Some(value) = value {
                             let x = context.get_register(value);
+                            println!("return {}", x.to_string());
                             return (x, trace.complete.len() == context.code.len());
                         } else {
                             return (
@@ -227,6 +234,7 @@ impl Runtime {
                         argc as _,
                     ));
                     let mut new_ctx = Context::new();
+                    new_ctx.terminate_upon_return = true;
                     new_ctx.return_register = Some(return_register);
                     for _ in 0..argc {
                         new_ctx
@@ -237,8 +245,8 @@ impl Runtime {
                     if function_object.is_tagged_number() {
                         unimplemented!() // TODO: try/catch support
                     } else {
-                        match function_object.get().value {
-                            ObjectValue::Function(ref function) => {
+                        match function_object.get_mut().value {
+                            ObjectValue::Function(ref mut function) => {
                                 if function.argc != -1
                                     && function.argc as usize != new_ctx.stack.len()
                                 {
@@ -249,19 +257,70 @@ impl Runtime {
                                     )
                                 }
                                 if let None = function.native {
-                                    new_ctx.code = function.code.clone();
-                                    new_ctx.bp = 0;
-                                    new_ctx.module = function.module.clone();
-                                    new_ctx.upvalues =
-                                        function.upvalues.iter().map(|x| x.clone()).collect();
-                                    /*thread.push_context(new_ctx);
-
-                                    enter_context!(thread, context, index, bindex);*/
-                                    let mut thread = JThread::new();
-                                    thread.push_context(new_ctx);
-                                    let result = RUNTIME
-                                        .run_function_with_thread(function_object, &mut thread);
-                                    context.set_register(return_register, result);
+                                    if function.hotness >= 10 {
+                                        let mut info = TRACE_INFO.with(|x| x.clone());
+                                        if info
+                                            .entry(function_object)
+                                            .or_insert(TraceInfo {
+                                                invocations: 0,
+                                                trace: vec![
+                                                    FusionBasicBlock {
+                                                        instructions: vec![]
+                                                    };
+                                                    context.code.len()
+                                                ],
+                                                current_block: 0,
+                                                complete: std::collections::HashSet::new(),
+                                            })
+                                            .complete()
+                                        {
+                                            function.hotness += 1;
+                                            let mut thread = JThread::new();
+                                            new_ctx.code = function.code.clone();
+                                            new_ctx.upvalues =
+                                                function.upvalues.iter().map(|x| *x).collect();
+                                            new_ctx.bp = 0;
+                                            new_ctx.module = function.module.clone();
+                                            new_ctx.return_register = Some(return_register);
+                                            new_ctx.terminate_upon_return = true;
+                                            new_ctx.function = function_object;
+                                            thread.push_context(new_ctx);
+                                            //println!("Done?");
+                                            let result = self.run_function_with_thread(
+                                                function_object,
+                                                &mut thread,
+                                            );
+                                            context.set_register(return_register, result);
+                                            continue;
+                                        }
+                                        let mut thread = JThread::new();
+                                        println!("run");
+                                        let (result, _) = self
+                                            .run_function_with_thread_and_tracing(
+                                                function_object,
+                                                &mut thread,
+                                                &mut *info,
+                                                &new_ctx.stack,
+                                            );
+                                        println!("Done!");
+                                        context.set_register(return_register, result);
+                                        continue;
+                                    } else {
+                                        new_ctx.code = function.code.clone();
+                                        new_ctx.function = function_object;
+                                        new_ctx.bp = 0;
+                                        function.hotness += 1;
+                                        new_ctx.module = function.module.clone();
+                                        new_ctx.upvalues =
+                                            function.upvalues.iter().map(|x| x.clone()).collect();
+                                        new_ctx.terminate_upon_return = true;
+                                        let mut thread = JThread::new();
+                                        thread.push_context(new_ctx);
+                                        println!("Invoke!");
+                                        let result = self
+                                            .run_function_with_thread(function_object, &mut thread);
+                                        context.set_register(return_register, result);
+                                    }
                                 } else if let Some(native) = function.native {
                                     context.set_register(
                                         return_register,
@@ -321,6 +380,7 @@ impl Runtime {
                             new_ctx.upvalues =
                                 function.upvalues.iter().map(|x| x.clone()).collect();
                             let mut thread = JThread::new();
+                            new_ctx.function = prototype;
                             thread.push_context(new_ctx);
                             let _ = RUNTIME.run_function_with_thread(prototype, &mut thread);
 

@@ -40,6 +40,7 @@ impl Runtime {
             let block: &BasicBlock = unsafe { context.code.get_unchecked(bindex) };
             instruction = block.instructions[index].clone();
             index += 1;
+            //println!("{}:{} {:?}", bindex, index, instruction);
             match instruction {
                 Instruction::LoadInt(r, val) => {
                     context.set_register(r, ObjectPointer::number(val as i64 as f64))
@@ -136,7 +137,8 @@ impl Runtime {
                         match function_object.get_mut().value {
                             ObjectValue::Function(ref mut function) => {
                                 if let None = function.native {
-                                    if function.hotness >= 10 {
+                                    /*if function.hotness >= 10 {
+                                        //println!("trace");
                                         let mut info =
                                             super::fusion::tracing_interpreter::TRACE_INFO
                                                 .with(|x| x.clone());
@@ -153,10 +155,9 @@ impl Runtime {
                                                 current_block: 0,
                                                 complete: std::collections::HashSet::new(),
                                             })
-                                            .complete
-                                            .len()
-                                            == function.code.len()
+                                            .complete()
                                         {
+                                            //println!("reall trace");
                                             new_ctx.code = function.code.clone();
                                             new_ctx.function = function_object;
                                             new_ctx.bp = 0;
@@ -181,18 +182,18 @@ impl Runtime {
                                             );
                                         drop(info);
                                         context.set_register(return_register, result);
-                                    } else {
-                                        new_ctx.code = function.code.clone();
-                                        new_ctx.function = function_object;
-                                        new_ctx.bp = 0;
-                                        function.hotness += 1;
-                                        new_ctx.module = function.module.clone();
-                                        new_ctx.upvalues =
-                                            function.upvalues.iter().map(|x| x.clone()).collect();
-                                        thread.push_context(new_ctx);
+                                    } else {*/
+                                    new_ctx.code = function.code.clone();
+                                    new_ctx.function = function_object;
+                                    new_ctx.bp = 0;
+                                    function.hotness += 1;
+                                    new_ctx.module = function.module.clone();
+                                    new_ctx.upvalues =
+                                        function.upvalues.iter().map(|x| x.clone()).collect();
+                                    thread.push_context(new_ctx);
 
-                                        enter_context!(thread, context, index, bindex);
-                                    }
+                                    enter_context!(thread, context, index, bindex);
+                                //}
                                 } else if let Some(native) = function.native {
                                     context.set_register(
                                         return_register,

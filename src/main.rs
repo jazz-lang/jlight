@@ -10,13 +10,15 @@ fn main() {
     let r = Reader::from_string(
         " 
 function fac(x) {
-    if x < 1 {
+    
+    if x < 2 {
         return 1
     } else {
-        return fac(x - 1) *x
+        var x = fac(x - 1) * x
+        return x
     }
 }
-fac(10)
+io.writeln(fac(6))
 ",
     );
     let mut p = Parser::new(r, &mut ast);
