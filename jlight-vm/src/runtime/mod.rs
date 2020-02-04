@@ -7,6 +7,7 @@ pub mod object;
 pub mod state;
 pub mod string_pool;
 pub mod threads;
+pub mod threaded_interpreter;
 pub mod value;
 use crate::util::arc::Arc;
 use module::*;

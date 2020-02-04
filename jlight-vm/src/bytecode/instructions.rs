@@ -1,4 +1,5 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
 pub enum Instruction {
     Load(u32, u32, u32),
     Store(u32, u32, u32),
@@ -63,6 +64,61 @@ macro_rules! vreg {
 }
 
 impl Instruction {
+    pub fn discriminant(&self) -> usize {
+        use Instruction::*;
+        match self {
+            Load { .. } => 0,
+            Store { .. } => 1,
+            LoadInt { .. } => 2,
+            LoadNull { .. } => 3,
+            LoadBool { .. } => 4,
+            LoadNum { .. } => 5,
+            LoadConst { .. } => 6,
+            LoadGlobal { .. } => 7,
+            LoadThis { .. } => 8,
+            LoadStatic { .. } => 9,
+            LoadU { .. } => 10,
+            StoreU { .. } => 11,
+            Construct { .. } => 12,
+            ConstructArray { .. } => 13,
+            Call { .. } => 14,
+            VirtCall { .. } => 15,
+            TailCall { .. } => 16,
+            Return { .. } => 17,
+            MakeEnv { .. } => 18,
+            Push { .. } => 19,
+            Pop { .. } => 20,
+            StoreStack { .. } => 21,
+            LoadStack { .. } => 22,
+            Goto { .. } => 23,
+            GotoIfFalse { .. } => 24,
+            GotoIfTrue { .. } => 25,
+            ConditionalGoto { .. } => 26,
+            Add { .. } => 27,
+            Sub { .. } => 28,
+            Div { .. } => 29,
+            Mod { .. } => 30,
+            Mul { .. } => 31,
+            Shr { .. } => 32,
+            Shl { .. } => 33,
+            Greater { .. } => 34,
+            Less { .. } => 35,
+            GreaterEqual { .. } => 36,
+            LessEqual { .. } => 37,
+            Equal { .. } => 38,
+            NotEqual { .. } => 39,
+            Not { .. } => 40,
+            And { .. } => 41,
+            Or { .. } => 42,
+            Xor { .. } => 43,
+            BoolAnd { .. } => 44,
+            BoolOr { .. } => 45,
+            CatchBlock { .. } => 46,
+            Move { .. } => 47,
+            Safepoint => 48,
+        }
+    }
+
     pub fn get_targets(&self) -> Vec<BlockIx> {
         match &self {
             Instruction::Goto(x)

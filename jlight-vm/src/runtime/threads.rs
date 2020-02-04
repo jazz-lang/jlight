@@ -46,7 +46,12 @@ impl JThread {
     pub fn pop_context(&self) -> bool {
         let local_data = self.local_data_mut();
         if let Some(parent) = local_data.context.parent.take() {
+            let old = local_data.context;
+            unsafe {
+                std::ptr::drop_in_place(old.0);
+            }
             local_data.context = parent;
+
             false
         } else {
             true
@@ -86,6 +91,15 @@ unsafe impl Send for JThread {}
 
 impl Drop for JThread {
     fn drop(&mut self) {
+        let local_data = self.local_data();
+        let mut context = Some(local_data.context);
+        while let Some(ccontext) = context {
+            let parent = ccontext.parent;
+            unsafe {
+                std::ptr::drop_in_place(ccontext.0);
+            }
+            context = parent;
+        }
         unsafe { std::ptr::drop_in_place(self.local_data.0) }
     }
 }
