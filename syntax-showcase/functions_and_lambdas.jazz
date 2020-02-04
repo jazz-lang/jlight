@@ -1,0 +1,16 @@
+function foo(arg) {
+    return arg * 2
+}
+
+function bar() {
+    return function() {
+        return 2
+    }
+}
+
+bar()()
+foo(4)
+
+var lambda = |x| {
+    return x + 4
+}

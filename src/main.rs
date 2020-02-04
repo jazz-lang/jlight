@@ -9,16 +9,6 @@ fn main() {
     let mut ast = vec![];
     let r = Reader::from_string(
         " 
-function fac(x) {
-    
-    if x < 2 {
-        return 1
-    } else {
-        var x = fac(x - 1) * x
-        return x
-    }
-}
-io.writeln(fac(6))
 ",
     );
     let mut p = Parser::new(r, &mut ast);

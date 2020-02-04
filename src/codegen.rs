@@ -21,7 +21,7 @@ pub enum Global {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Access {
     Env(i32),
-    Stack(String,i32),
+    Stack(String, i32),
     Global(i32, bool, String),
     Field(Box<Expr>, String),
     Index(i32),
@@ -167,10 +167,10 @@ impl Context {
             Access::Env(n) => {
                 self.write(Instruction::StoreU(r, n as _));
             }
-            Access::Stack(name,_) => {
+            Access::Stack(name, _) => {
                 let l = self.new_reg();
                 self.write(Instruction::Move(l as _, r));
-                self.locals.insert(name,l as _);
+                self.locals.insert(name, l as _);
             }
             Access::Global(g, _, _) => unimplemented!(),
             Access::Field(obj, f) => {
@@ -198,7 +198,7 @@ impl Context {
                 self.write(Instruction::LoadU(r, i as _));
                 return r;
             }
-            Access::Stack(_,l) => {
+            Access::Stack(_, l) => {
                 self.write(Instruction::Move(r, l as _));
                 return r;
             }
@@ -240,7 +240,7 @@ impl Context {
                 let s: &str = name;
                 if l.is_some() {
                     let l = *l.unwrap();
-                    return Access::Stack(name.to_owned(),l);
+                    return Access::Stack(name.to_owned(), l);
                 } else if self.env.contains_key(s) {
                     let l = self.env.get(s);
                     self.used_upvars.insert(s.to_owned(), *l.unwrap());
@@ -603,6 +603,7 @@ impl Context {
 
                 r
             }
+            ExprKind::Lambda(arguments, body) => self.compile_function(arguments, body, None),
             ExprKind::Access(f, s) => {
                 let acc = self.compile_access(&ExprKind::Access(f.clone(), s.clone()));
                 self.access_get(acc)
@@ -691,8 +692,8 @@ impl Context {
                 .insert(Global::Var(vname.as_ref().unwrap().to_owned()), gid as i32);
         }
         ctx.g.borrow_mut().table.push(Global::Func(gid as i32, -1));
-        ctx.compile(e, true);
-        ctx.write(Instruction::Return(None));
+        let r = ctx.compile(e, true);
+        ctx.write(Instruction::Return(Some(r)));
         jlight_vm::runtime::fusion::optimizer::simplify_cfg(&mut ctx.bbs);
 
         ctx.finalize();
@@ -707,7 +708,7 @@ impl Context {
         ));
 
         if ctx.nenv > 0 {
-            for (var, _) in ctx.used_upvars.iter().rev() {
+            for (var, _) in ctx.used_upvars.iter() {
                 let r = self.ident(var);
                 self.write(Instruction::Push(r));
             }
@@ -773,8 +774,8 @@ pub fn compile(ast: Vec<Box<Expr>>) -> Context {
         expr: ExprKind::Block(ast.clone()),
     });
 
-    ctx.compile(&ast, false);
-    ctx.write(Instruction::Return(None));
+    let r = ctx.compile(&ast, false);
+    ctx.write(Instruction::Return(Some(r)));
     ctx
 }
 
