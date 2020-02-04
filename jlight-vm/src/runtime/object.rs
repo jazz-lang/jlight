@@ -86,7 +86,7 @@ unsafe impl Sync for ObjectPointer {}
 unsafe impl Send for ObjectPointer {}
 
 impl ObjectPointer {
-    pub fn is_false(&self, state: &RcState) -> bool {
+    pub fn is_false(&self) -> bool {
         if self.is_null() {
             return true;
         }
@@ -97,7 +97,7 @@ impl ObjectPointer {
                 ObjectValue::Bool(true) => false,
                 ObjectValue::Bool(false) => true,
                 ObjectValue::None => true,
-                _ => *self == state.nil_prototype,
+                _ => false,
             }
         }
     }

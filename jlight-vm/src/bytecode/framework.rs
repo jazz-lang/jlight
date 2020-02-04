@@ -31,7 +31,6 @@ pub struct BytecodeFunction {
     stack_positions: Ptr<HashMap<usize, usize>>,
     virtual_regs: usize,
     stack: Ptr<usize>,
-    maped: Ptr<bool>,
 }
 
 use regalloc::{
@@ -47,7 +46,6 @@ impl BytecodeFunction {
             stack: Ptr::new(0),
             stack_positions: Ptr::new(HashMap::new()),
             virtual_regs: 0,
-            maped: Ptr::new(false),
         }
     }
     pub fn new_virt_reg(&mut self) -> u32 {

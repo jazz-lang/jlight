@@ -50,9 +50,6 @@ pub enum Instruction {
     CatchBlock(u32, u32),
     Move(u32, u32),
     Safepoint,
-    UnfinishedGoto(String),
-    UnfinishedGotoF(u32, String),
-    UnfinishedGotoT(u32, String),
 }
 use regalloc::{
     BlockIx, InstIx, Map, MyRange, RealReg, RealRegUniverse, Reg, RegClass, Set, SpillSlot,

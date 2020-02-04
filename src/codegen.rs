@@ -21,7 +21,7 @@ pub enum Global {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Access {
     Env(i32),
-    Stack(i32),
+    Stack(String,i32),
     Global(i32, bool, String),
     Field(Box<Expr>, String),
     Index(i32),
@@ -167,7 +167,11 @@ impl Context {
             Access::Env(n) => {
                 self.write(Instruction::StoreU(r, n as _));
             }
-            Access::Stack(l) => self.write(Instruction::Move(l as _, r)),
+            Access::Stack(name,_) => {
+                let l = self.new_reg();
+                self.write(Instruction::Move(l as _, r));
+                self.locals.insert(name,l as _);
+            }
             Access::Global(g, _, _) => unimplemented!(),
             Access::Field(obj, f) => {
                 let (gid, _) = self.global(&Global::Str(f.to_owned()));
@@ -194,7 +198,7 @@ impl Context {
                 self.write(Instruction::LoadU(r, i as _));
                 return r;
             }
-            Access::Stack(l) => {
+            Access::Stack(_,l) => {
                 self.write(Instruction::Move(r, l as _));
                 return r;
             }
@@ -229,38 +233,6 @@ impl Context {
         }
     }
 
-    pub fn emit_goto(&mut self, x: &str) {
-        self.write(Instruction::UnfinishedGoto(x.to_owned()))
-    }
-
-    pub fn emit_gotof(&mut self, r: u32, x: &str) {
-        self.write(Instruction::UnfinishedGotoF(r, x.to_owned()));
-    }
-
-    pub fn emit_gotot(&mut self, r: u32, x: &str) {
-        self.write(Instruction::UnfinishedGotoT(r, x.to_owned()));
-    }
-
-    pub fn finish(&mut self) {
-        let labels = self.labels.clone();
-        self.bbs.iter_mut().for_each(|bb| {
-            for ins in bb.instructions.iter_mut() {
-                let mut new = match ins {
-                    Instruction::UnfinishedGoto(ref lbl) => {
-                        Instruction::Goto(labels.get(lbl).unwrap().clone().unwrap() as _)
-                    }
-                    Instruction::UnfinishedGotoF(x, ref lbl) => {
-                        Instruction::GotoIfFalse(*x, labels.get(lbl).unwrap().clone().unwrap() as _)
-                    }
-                    Instruction::UnfinishedGotoT(x, ref lbl) => {
-                        Instruction::GotoIfTrue(*x, labels.get(lbl).unwrap().clone().unwrap() as _)
-                    }
-                    ref op => (*op).clone(),
-                };
-                std::mem::swap(ins, &mut new);
-            }
-        });
-    }
     pub fn compile_access(&mut self, e: &ExprKind) -> Access {
         match e {
             ExprKind::Ident(name) => {
@@ -268,7 +240,7 @@ impl Context {
                 let s: &str = name;
                 if l.is_some() {
                     let l = *l.unwrap();
-                    return Access::Stack(l);
+                    return Access::Stack(name.to_owned(),l);
                 } else if self.env.contains_key(s) {
                     let l = self.env.get(s);
                     self.used_upvars.insert(s.to_owned(), *l.unwrap());

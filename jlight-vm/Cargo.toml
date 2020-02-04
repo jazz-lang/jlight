@@ -17,6 +17,12 @@ num_cpus = "1.12"
 fxhash = "0.2"
 color-backtrace = { version = "0.3", default-features = false }
 regalloc = {path = "regalloc.rs/lib/"}
+cfg-if = "0.1"
 [profile.release]
 lto = true
 panic="abort"
+
+[features]
+default = ["use-value64"]
+use32-64-value = []
+use-value64 = []

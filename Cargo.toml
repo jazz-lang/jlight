@@ -11,3 +11,4 @@ hmap = "0.1"
 jlight-vm = {path = "jlight-vm"}
 regalloc = {path = "jlight-vm/regalloc.rs/lib"}
 hashlink = "0.4"
+

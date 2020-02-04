@@ -429,7 +429,7 @@ impl Runtime {
                 }
                 Instruction::ConditionalGoto(r0, x, y) => {
                     let value = context.get_register(r0);
-                    if value.is_false(&self.state) {
+                    if value.is_false() {
                         bindex = y as usize;
                         index = 0;
                     } else {
@@ -444,13 +444,13 @@ impl Runtime {
                 }
                 Instruction::GotoIfFalse(r0, block) => {
                     let value = context.get_register(r0);
-                    if value.is_false(&self.state) {
+                    if value.is_false() {
                         bindex = block as usize;
                     }
                 }
                 Instruction::GotoIfTrue(r0, block) => {
                     let value = context.get_register(r0);
-                    if !value.is_false(&self.state) {
+                    if !value.is_false() {
                         bindex = block as usize;
                     }
                 }
@@ -860,15 +860,15 @@ impl Runtime {
                 Instruction::BoolAnd(r0, r1, r2) => {
                     let r1 = context.get_register(r1);
                     let r2 = context.get_register(r2);
-                    let x = !r1.is_false(&self.state);
-                    let y = !r2.is_false(&self.state);
+                    let x = !r1.is_false();
+                    let y = !r2.is_false();
                     context.set_register(r0, self.allocate_bool(x && y));
                 }
                 Instruction::BoolOr(r0, r1, r2) => {
                     let r1 = context.get_register(r1);
                     let r2 = context.get_register(r2);
-                    let x = !r1.is_false(&self.state);
-                    let y = !r2.is_false(&self.state);
+                    let x = !r1.is_false();
+                    let y = !r2.is_false();
                     context.set_register(r0, self.allocate_bool(x || y));
                 }
                 Instruction::LoadNull(x) => context.set_register(x, self.allocate_null()),
