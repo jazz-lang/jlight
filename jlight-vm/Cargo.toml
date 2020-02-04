@@ -11,9 +11,9 @@ ahash = "0.3"
 parking_lot = "0.10"
 crossbeam-deque = "0.7"
 crossbeam-channel = "0.4"
-mimalloc = "0.1"
 lazy_static = "1.4"
 num_cpus = "1.12"
+mimalloc = "0.1"
 fxhash = "0.2"
 color-backtrace = { version = "0.3", default-features = false }
 regalloc = {path = "regalloc.rs/lib/"}

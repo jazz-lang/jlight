@@ -1,0 +1,15 @@
+// WARNING: Classes not parsed for now
+class Point {
+    init(x,y) {
+        self.x = x
+        self.y =y
+    }
+
+    function getX() {
+        return self.x
+    }
+}
+
+var p = new Point(2,3)
+
+io.writeln(p.x)
