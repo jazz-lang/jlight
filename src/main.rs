@@ -9,6 +9,12 @@ fn main() {
     let mut ast = vec![];
     let r = Reader::from_string(
         " 
+
+var x = 42
+
+var y = 3
+var z = x + y
+return z
 ",
     );
     let mut p = Parser::new(r, &mut ast);

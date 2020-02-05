@@ -105,6 +105,21 @@ static mut MAPED: bool = false;
 impl regalloc::interface::Function for BytecodeFunction {
     type Inst = Instruction;
 
+    fn is_ret(&self, ins: InstIx) -> bool {
+        match &self.instructions[ins] {
+            Instruction::Return(_) => true,
+            _ => false,
+        }
+    }
+
+    fn func_liveins(&self) -> Set<RealReg> {
+        Set::empty()
+    }
+
+    fn func_liveouts(&self) -> Set<RealReg> {
+        Set::empty()
+    }
+
     fn insns(&self) -> &[Instruction] {
         self.instructions.elems()
     }
@@ -169,21 +184,21 @@ impl regalloc::interface::Function for BytecodeFunction {
         }
     }
 
-    fn get_spillslot_size(&self, _: RegClass) -> u32 {
+    fn get_spillslot_size(&self, _: RegClass, _: VirtualReg) -> u32 {
         // For our VM, every value occupies one spill slot.
         1
     }
 
-    fn gen_spill(&self, to_slot: SpillSlot, from_reg: RealReg) -> Instruction {
+    fn gen_spill(&self, to_slot: SpillSlot, from_reg: RealReg, _: VirtualReg) -> Instruction {
         //self.spill(to_slot);
         Instruction::Push(from_reg.get_index() as _)
     }
 
-    fn gen_reload(&self, to: RealReg, slot: SpillSlot) -> Instruction {
+    fn gen_reload(&self, to: RealReg, slot: SpillSlot, _: VirtualReg) -> Instruction {
         Instruction::LoadStack(to.get_index() as u32, slot.get_usize() as u16)
     }
 
-    fn gen_move(&self, to: RealReg, from: RealReg) -> Instruction {
+    fn gen_move(&self, to: RealReg, from: RealReg, _: VirtualReg) -> Instruction {
         Instruction::Move(to.get_index() as _, from.get_index() as _)
     }
 
