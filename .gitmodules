@@ -1,3 +1,0 @@
-[submodule "jlight-vm/regalloc.rs"]
-	path = jlight-vm/regalloc.rs
-	url = https://github.com/bnjbvr/regalloc.rs/
