@@ -1,14 +1,10 @@
 use super::*;
+use crate::runtime::value::*;
 use std::thread::spawn;
-
-pub extern "C" fn thread_init(
-    rt: &Runtime,
-    this: ObjectPointer,
-    args: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
+pub extern "C" fn thread_init(rt: &Runtime, this: Value, args: &[Value]) -> Result<Value, Value> {
     assert!(args.len() >= 1);
     let function = args[0];
-    if let ObjectValue::Function(ref f) = function.get().value {
+    if let ObjectValue::Function(ref f) = function.as_cell().get().value {
         if !f.upvalues.is_empty() {
             return Err(rt.allocate_string(Arc::new(
                 "Thread function cannot capture variables".to_owned(),
@@ -24,16 +20,12 @@ pub extern "C" fn thread_init(
         result
     });
 
-    this.get_mut().value = ObjectValue::Thread(Some(th));
+    this.as_cell().get_mut().value = ObjectValue::Thread(Some(th));
     Ok(this)
 }
 
-pub extern "C" fn thread_join(
-    rt: &Runtime,
-    this: ObjectPointer,
-    _: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
-    match this.get_mut().value {
+pub extern "C" fn thread_join(rt: &Runtime, this: Value, _: &[Value]) -> Result<Value, Value> {
+    match this.as_cell().get_mut().value {
         ObjectValue::Thread(ref mut handle) => match handle.take() {
             Some(handle) => match handle.join() {
                 Ok(value) => return Ok(value),

@@ -1,4 +1,5 @@
 use super::module::Module;
+use super::value::*;
 use crate::runtime::state::{RcState, State};
 use crate::util::arc::Arc;
 use crate::util::tagged_pointer::*;
@@ -11,16 +12,16 @@ pub enum ObjectValue {
     Bool(bool),
     String(Arc<String>),
     File(fs::File),
-    Array(Vec<ObjectPointer>),
+    Array(Vec<Value>),
     ByteArray(Vec<u8>),
     Function(Function),
     Module(Arc<Module>),
-    Thread(Option<std::thread::JoinHandle<ObjectPointer>>),
+    Thread(Option<std::thread::JoinHandle<Value>>),
 }
 
 pub struct Object {
-    pub prototype: ObjectPointer,
-    pub attributes: TaggedPointer<AHashMap<Arc<String>, ObjectPointer>>,
+    pub prototype: Value,
+    pub attributes: TaggedPointer<AHashMap<Arc<String>, Value>>,
     pub value: ObjectValue,
     pub marked: AtomicBool,
 }
@@ -46,7 +47,7 @@ impl ObjectValue {
     }
 }
 
-pub type AttributesMap = AHashMap<Arc<String>, ObjectPointer>;
+pub type AttributesMap = AHashMap<Arc<String>, Value>;
 
 macro_rules! push_collection {
     ($map:expr, $what:ident, $vec:expr) => {{
@@ -58,11 +59,7 @@ macro_rules! push_collection {
     }};
 }
 
-pub type NativeFn = extern "C" fn(
-    &Runtime,
-    ObjectPointer,
-    &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer>;
+pub type NativeFn = extern "C" fn(&Runtime, Value, &[Value]) -> Result<Value, Value>;
 
 use super::Runtime;
 use crate::util::ptr::Ptr;
@@ -70,7 +67,7 @@ pub struct Function {
     /// function name
     pub name: Arc<String>,
     /// captured values from parent scope
-    pub upvalues: Vec<ObjectPointer>,
+    pub upvalues: Vec<Value>,
     pub argc: i32,
     pub code: Ptr<Vec<crate::bytecode::block::BasicBlock>>,
     /// Native function pointer
@@ -115,17 +112,17 @@ impl ObjectPointer {
             self.get().marked.load(Ordering::Relaxed)
         }
     }
-    pub fn prototype(&self, state: &State) -> Option<ObjectPointer> {
+    pub fn prototype(&self, state: &State) -> Option<Value> {
         if self.is_tagged_number() {
             Some(state.number_prototype)
         } else {
             self.get().prototype()
         }
     }
-    pub fn set_prototype(&self, proto: ObjectPointer) {
+    pub fn set_prototype(&self, proto: Value) {
         self.get_mut().set_prototype(proto);
     }
-    pub fn is_kind_of(&self, state: &RcState, other: ObjectPointer) -> bool {
+    pub fn is_kind_of(&self, state: &RcState, other: Value) -> bool {
         let mut prototype = self.prototype(state);
 
         while let Some(proto) = prototype {
@@ -140,35 +137,39 @@ impl ObjectPointer {
     }
 
     /// Adds an attribute to the object this pointer points to.
-    pub fn add_attribute(&self, name: &Arc<String>, attr: ObjectPointer) {
+    pub fn add_attribute(&self, name: &Arc<String>, attr: Value) {
         self.get_mut().add_attribute(name.clone(), attr);
 
         //process.write_barrier(*self, attr);
     }
 
     /// Looks up an attribute.
-    pub fn lookup_attribute(&self, state: &RcState, name: &Arc<String>) -> Option<ObjectPointer> {
+    pub fn lookup_attribute(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
         if self.is_tagged_number() {
-            state.number_prototype.get().lookup_attribute(name)
+            state
+                .number_prototype
+                .as_cell()
+                .get()
+                .lookup_attribute(name)
         } else {
             self.get().lookup_attribute(name)
         }
     }
 
     /// Looks up an attribute without walking the prototype chain.
-    pub fn lookup_attribute_in_self(
-        &self,
-        state: &RcState,
-        name: &Arc<String>,
-    ) -> Option<ObjectPointer> {
+    pub fn lookup_attribute_in_self(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
         if self.is_tagged_number() {
-            state.number_prototype.get().lookup_attribute_in_self(name)
+            state
+                .number_prototype
+                .as_cell()
+                .get()
+                .lookup_attribute_in_self(name)
         } else {
             self.get().lookup_attribute_in_self(name)
         }
     }
 
-    pub fn attributes(&self) -> Vec<ObjectPointer> {
+    pub fn attributes(&self) -> Vec<Value> {
         if self.is_tagged_number() {
             vec![]
         } else {
@@ -327,7 +328,7 @@ impl Object {
     /// Returns a new object with the given value.
     pub fn new(value: ObjectValue) -> Object {
         Object {
-            prototype: ObjectPointer::null(),
+            prototype: Value::from(VTag::Null),
             attributes: TaggedPointer::null(),
             value,
             marked: AtomicBool::new(false),
@@ -339,7 +340,7 @@ impl Object {
     }
 
     /// Returns a new object with the given value and prototype.
-    pub fn with_prototype(value: ObjectValue, prototype: ObjectPointer) -> Object {
+    pub fn with_prototype(value: ObjectValue, prototype: Value) -> Object {
         Object {
             prototype,
             attributes: TaggedPointer::null(),
@@ -367,13 +368,13 @@ impl Object {
         }
     }
     /// Sets the prototype of this object.
-    pub fn set_prototype(&mut self, prototype: ObjectPointer) {
+    pub fn set_prototype(&mut self, prototype: Value) {
         self.prototype = prototype;
     }
 
     /// Returns the prototype of this object.
-    pub fn prototype(&self) -> Option<ObjectPointer> {
-        if self.prototype.is_null() {
+    pub fn prototype(&self) -> Option<Value> {
+        if self.prototype.is_null_or_undefined() {
             None
         } else {
             Some(self.prototype)
@@ -381,20 +382,20 @@ impl Object {
     }
 
     /// Returns and removes the prototype of this object.
-    pub fn take_prototype(&mut self) -> Option<ObjectPointer> {
-        if self.prototype.is_null() {
+    pub fn take_prototype(&mut self) -> Option<Value> {
+        if self.prototype.is_null_or_undefined() {
             None
         } else {
             let proto = self.prototype;
 
-            self.prototype = ObjectPointer::null();
+            self.prototype = Value::from(VTag::Null);
 
             Some(proto)
         }
     }
 
     /// Removes an attribute and returns it.
-    pub fn remove_attribute(&mut self, name: &Arc<String>) -> Option<ObjectPointer> {
+    pub fn remove_attribute(&mut self, name: &Arc<String>) -> Option<Value> {
         if let Some(map) = self.attributes_map_mut() {
             map.remove(name)
         } else {
@@ -403,7 +404,7 @@ impl Object {
     }
 
     /// Returns all the attributes available to this object.
-    pub fn attributes(&self) -> Vec<ObjectPointer> {
+    pub fn attributes(&self) -> Vec<Value> {
         let mut attributes = Vec::new();
 
         if let Some(map) = self.attributes_map() {
@@ -428,7 +429,7 @@ impl Object {
     }
 
     /// Looks up an attribute in either the current object or a parent object.
-    pub fn lookup_attribute(&self, name: &Arc<String>) -> Option<ObjectPointer> {
+    pub fn lookup_attribute(&self, name: &Arc<String>) -> Option<Value> {
         let got = self.lookup_attribute_in_self(&name);
 
         if got.is_some() {
@@ -440,14 +441,17 @@ impl Object {
             let mut opt_parent = self.prototype();
 
             while let Some(parent_ptr) = opt_parent {
-                let parent = parent_ptr.get();
-                let got = parent.lookup_attribute_in_self(name);
+                if parent_ptr.is_null_or_undefined() || !parent_ptr.is_cell() {
+                    break;
+                }
+                let parent = parent_ptr.as_cell();
+                let got = parent.get().lookup_attribute_in_self(name);
 
                 if got.is_some() {
                     return got;
                 }
 
-                opt_parent = parent.prototype();
+                opt_parent = parent.get().prototype();
             }
         }
 
@@ -543,16 +547,16 @@ impl Object {
         self.attributes.atomic_bit_is_set(FORWARDED_BIT)
     }
     /// Adds a new attribute to the current object.
-    pub fn add_attribute(&mut self, name: Arc<String>, object: ObjectPointer) {
+    pub fn add_attribute(&mut self, name: Arc<String>, object: Value) {
         self.allocate_attributes_map();
 
         self.attributes_map_mut().unwrap().insert(name, object);
     }
 
     /// Looks up an attribute without walking the prototype chain.
-    pub fn lookup_attribute_in_self(&self, name: &Arc<String>) -> Option<ObjectPointer> {
+    pub fn lookup_attribute_in_self(&self, name: &Arc<String>) -> Option<Value> {
         if let Some(map) = self.attributes_map() {
-            map.get(name).cloned()
+            map.get(name).map(|x| *x)
         } else {
             None
         }
@@ -629,7 +633,7 @@ impl Eq for ObjectPointerPointer {}
 unsafe impl Sync for ObjectPointerPointer {}
 unsafe impl Send for ObjectPointerPointer {}
 
-pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> ObjectPointer {
+pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> Value {
     let function = Function {
         argc,
         upvalues: vec![],

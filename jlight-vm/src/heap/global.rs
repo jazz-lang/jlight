@@ -2,6 +2,7 @@ use super::tracer::*;
 use crate::runtime::object::*;
 use crate::runtime::state::*;
 use crate::runtime::threads::JThread;
+use crate::runtime::value::*;
 use crate::util::arc::Arc;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -80,7 +81,7 @@ impl GlobalCollector {
         self.bytes_allocated.load(Ordering::Acquire) > self.threshold.load(Ordering::Acquire)
     }
 
-    pub fn allocate(&self, object: Object) -> ObjectPointer {
+    pub fn allocate(&self, object: Object) -> crate::runtime::value::Value {
         unsafe {
             let mut heap = self.heap.lock();
             let pointer = std::alloc::alloc(std::alloc::Layout::new::<Object>()).cast::<Object>();
@@ -92,7 +93,7 @@ impl GlobalCollector {
             self.bytes_allocated
                 .fetch_add(std::mem::size_of::<Object>(), Ordering::Relaxed);
             drop(heap);
-            x
+            Value::from(x)
         }
     }
 }

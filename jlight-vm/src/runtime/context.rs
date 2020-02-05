@@ -1,6 +1,7 @@
 use super::module::Module;
 use super::object::*;
 use super::state::*;
+use super::value::*;
 use crate::bytecode::block::BasicBlock;
 use crate::bytecode::instructions::Instruction;
 use crate::util::arc::Arc;
@@ -15,17 +16,17 @@ pub struct CatchEntry {
 pub struct Context {
     pub ip: usize,
     pub bp: usize,
-    pub registers: [ObjectPointer; 48],
+    pub registers: [Value; 48],
     /// Context stack, used for passing arguments and storing values if there are no enough registers
-    pub stack: Vec<ObjectPointer>,
-    pub upvalues: Vec<ObjectPointer>,
-    pub this: ObjectPointer,
+    pub stack: Vec<Value>,
+    pub upvalues: Vec<Value>,
+    pub this: Value,
     pub return_register: Option<u32>,
     pub terminate_upon_return: bool,
     pub module: Arc<Module>,
     pub code: Ptr<Vec<BasicBlock>>,
     pub parent: Option<Ptr<Context>>,
-    pub function: ObjectPointer,
+    pub function: Value,
 }
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
@@ -34,7 +35,56 @@ impl Context {
         Self {
             ip: 0,
             bp: 0,
-            registers: [ObjectPointer::null(); 48],
+            registers: [
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+                Value::from(VTag::Null),
+            ],
             stack: vec![],
             upvalues: vec![],
             return_register: None,
@@ -45,8 +95,8 @@ impl Context {
             }),
             code: Ptr::null(),
             parent: None,
-            this: ObjectPointer::null(),
-            function: ObjectPointer::null(),
+            this: Value::from(VTag::Undefined),
+            function: Value::from(VTag::Undefined),
         }
     }
 
@@ -80,12 +130,12 @@ impl Context {
         }
     }
 
-    pub fn set_register(&mut self, r: u32, value: ObjectPointer) {
+    pub fn set_register(&mut self, r: u32, value: Value) {
         self.registers[r as usize] = value;
     }
 
-    pub fn get_register(&self, r: u32) -> ObjectPointer {
-        self.registers[r as usize]
+    pub fn get_register(&self, r: u32) -> Value {
+        self.registers[r as usize].clone()
     }
 
     pub fn move_(&mut self, to: u32, from: u32) {

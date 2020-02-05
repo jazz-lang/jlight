@@ -40,6 +40,10 @@ macro_rules! catch {
 }
 
 impl<'a> State<'a> {
+    /// This function **must** be tail call otherwise we will get stack overflow.
+    /// Though we can use inline assembly to implement threaded interpreter but this requires
+    /// lots of unsafe and nightly Rust.
+    #[inline(always)]
     pub fn dispatch(&mut self) -> Value {
         let block = unsafe { self.context.code.get_unchecked(self.bindex) };
         let instruction = unsafe { block.instructions.get_unchecked(self.index).clone() };
@@ -48,6 +52,7 @@ impl<'a> State<'a> {
     }
 }
 
+/// Just hint to compiler that this code is *really* unreachable.
 fn unreachable() -> ! {
     unsafe {
         std::hint::unreachable_unchecked();

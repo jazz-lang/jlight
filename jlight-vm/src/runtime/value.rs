@@ -1,7 +1,10 @@
 use super::object::*;
-
+use super::state::*;
+use crate::util::arc::Arc;
+use std::sync::atomic::Ordering;
 pub type EncodedValue = i64;
 
+#[derive(Copy, Clone)]
 #[repr(C)]
 union EncodedValueDescriptor {
     as_int64: i64,
@@ -264,6 +267,11 @@ impl Value {
     pub fn as_int32(&self) -> i32 {
         unsafe { self.u.as_int64 as i32 }
     }
+
+    pub fn is_tagged_number(&self) -> bool {
+        self.is_number()
+    }
+
     pub fn to_number(&self) -> f64 {
         if self.is_int32() {
             return self.as_int32() as _;
@@ -286,6 +294,129 @@ impl Value {
         std::f64::NAN
     }
 
+    pub fn is_marked(&self) -> bool {
+        if !self.is_cell() {
+            true
+        } else {
+            self.as_cell().get().marked.load(Ordering::Acquire)
+        }
+    }
+
+    pub fn mark(&mut self) {
+        if !self.is_cell() {
+            return;
+        }
+
+        self.as_cell()
+            .get_mut()
+            .marked
+            .store(true, Ordering::Release);
+    }
+
+    pub fn unmark(&mut self) {
+        if !self.is_cell() {
+            return;
+        }
+
+        self.as_cell()
+            .get_mut()
+            .marked
+            .store(false, Ordering::Relaxed)
+    }
+    pub fn prototype(&self, state: &State) -> Option<Value> {
+        if self.is_tagged_number() {
+            Some(state.number_prototype)
+        } else if self.is_bool() {
+            Some(state.boolean_prototype)
+        } else {
+            self.as_cell().prototype(state)
+        }
+    }
+
+    pub fn pointer(&self) -> ObjectPointerPointer {
+        if self.is_cell() {
+            self.as_cell().pointer()
+        } else {
+            ObjectPointer::number(0.0).pointer()
+        }
+    }
+    pub fn set_prototype(&self, proto: Value) {
+        self.as_cell().get_mut().set_prototype(proto);
+    }
+    pub fn is_kind_of(&self, state: &RcState, other: Value) -> bool {
+        let mut prototype = self.prototype(state);
+
+        while let Some(proto) = prototype {
+            if proto == other {
+                return true;
+            }
+
+            prototype = proto.prototype(state);
+        }
+
+        false
+    }
+    /// Adds an attribute to the object this pointer points to.
+    pub fn add_attribute(&self, name: &Arc<String>, attr: Value) {
+        self.as_cell().get_mut().add_attribute(name.clone(), attr);
+
+        //process.write_barrier(*self, attr);
+    }
+
+    /// Looks up an attribute.
+    pub fn lookup_attribute(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
+        if self.is_cell() {
+            self.as_cell().lookup_attribute(state, name)
+        } else if self.is_bool() {
+            state.boolean_prototype.lookup_attribute(state, name)
+        } else if self.is_number() {
+            state.number_prototype.lookup_attribute(state, name)
+        } else {
+            None
+        }
+    }
+
+    /// Looks up an attribute without walking the prototype chain.
+    pub fn lookup_attribute_in_self(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
+        if self.is_number() {
+            state
+                .number_prototype
+                .as_cell()
+                .get()
+                .lookup_attribute_in_self(name)
+        } else if self.is_bool() {
+            state
+                .boolean_prototype
+                .as_cell()
+                .get()
+                .lookup_attribute_in_self(name)
+        } else {
+            self.as_cell().get().lookup_attribute_in_self(name)
+        }
+    }
+
+    pub fn attributes(&self) -> Vec<Value> {
+        if self.is_cell() {
+            return self.as_cell().get().attributes();
+        }
+
+        vec![]
+    }
+
+    pub fn attribute_names(&self) -> Vec<Arc<String>> {
+        if self.is_cell() {
+            return self
+                .as_cell()
+                .get()
+                .attribute_names()
+                .iter()
+                .map(|x| (*x).clone())
+                .collect();
+        }
+
+        vec![]
+    }
+
     pub fn to_boolean(&self) -> bool {
         if self.is_null_or_undefined() {
             return false;
@@ -295,6 +426,26 @@ impl Value {
         }
 
         !unsafe { self.u.ptr.is_false() }
+    }
+
+    pub fn to_string(&self) -> Arc<String> {
+        if self.is_cell() {
+            return self.as_cell().to_string();
+        } else if self.is_bool() {
+            if self.to_boolean() {
+                return Arc::new("true".to_owned());
+            } else {
+                return Arc::new("false".to_owned());
+            }
+        } else if self.is_null() {
+            return Arc::new("null".to_owned());
+        } else if self.is_undefined() {
+            return Arc::new("undefined".to_owned());
+        } else if self.is_number() {
+            return Arc::new(self.to_number().to_string());
+        } else {
+            unreachable!()
+        }
     }
 }
 
@@ -362,3 +513,12 @@ impl PartialEq for Value {
 }
 
 impl Eq for Value {}
+
+impl Clone for Value {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl Copy for Value {}

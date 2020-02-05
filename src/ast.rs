@@ -32,7 +32,7 @@ pub enum ExprKind {
     Nil,
     Break,
     Continue,
-    Throw(String),
+    Throw(Box<Expr>),
     ConstBool(bool),
     Array(Vec<Box<Expr>>),
     ArrayIndex(Box<Expr>, Box<Expr>),

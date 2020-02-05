@@ -1,19 +1,20 @@
 pub mod builtins;
 pub mod context;
 pub mod fusion;
-pub mod interpreter;
+//pub mod interpreter;
 pub mod module;
 pub mod object;
 pub mod state;
 pub mod string_pool;
-pub mod threads;
 pub mod threaded_interpreter;
+pub mod threads;
 pub mod value;
 use crate::util::arc::Arc;
 use module::*;
 use object::*;
 use state::*;
 use threads::*;
+use value::*;
 pub struct Runtime {
     pub state: RcState,
     pub registry: crate::util::arc::Arc<ModuleRegistry>,
@@ -31,11 +32,11 @@ impl Runtime {
         Self { state, registry }
     }
 
-    pub fn run_function(&self, function: ObjectPointer) -> ObjectPointer {
-        if function.is_tagged_number() {
+    pub fn run_function(&self, function: Value) -> Value {
+        if !function.is_cell() {
             panic!("not a function");
         }
-        match function.get().value {
+        match function.as_cell().get().value {
             ObjectValue::Function(ref func) => threads::THREAD.with(|thread| {
                 let mut context = context::Context::new();
                 context.code = func.code.clone();
@@ -44,7 +45,8 @@ impl Runtime {
                 context.function = function;
                 context.upvalues = func.upvalues.clone();
                 thread.get().push_context(context);
-                return self.run(thread.get());
+                unimplemented!()
+                //return self.run(thread.get());
             }),
             _ => panic!("not a function"),
         }
@@ -60,41 +62,24 @@ impl Runtime {
         }
         match function.get().value {
             ObjectValue::Function(_) => {
-                return self.run(thread);
+                unimplemented!()
+                //return self.run(thread);
             }
             _ => panic!("not a function"),
         }
     }
-    pub fn run_function_with_thread_and_tracing(
-        &self,
-        function: ObjectPointer,
-        thread: &mut Arc<JThread>,
-        trace_info: &mut std::collections::HashMap<
-            ObjectPointer,
-            fusion::tracing_interpreter::TraceInfo,
-        >,
-        args: &[ObjectPointer],
-    ) -> (ObjectPointer, bool) {
-        if function.is_tagged_number() {
-            panic!("Not a function");
-        }
-        match function.get().value {
-            ObjectValue::Function(ref func) => {
-                let mut context = context::Context::new();
-                context.code = func.code.clone();
-                context.module = func.module.clone();
-                context.terminate_upon_return = true;
-                context.function = function;
-                context.terminate_upon_return = true;
-                context.stack = args.to_vec();
-                //for (i, arg) in context.stack.iter().enumerate() {
-                //println!("arg {} {}", i, arg.to_string());
-                //}
-                context.upvalues = func.upvalues.clone();
-                thread.push_context(context);
-                return self.run_tracing(thread, trace_info);
-            }
-            _ => panic!("not a function"),
-        }
+
+    pub fn allocate_null(&self) -> Value {
+        self.state.nil_prototype
+    }
+
+    pub fn allocate_string(&self, s: Arc<String>) -> Value {
+        let object = Object::with_prototype(ObjectValue::String(s), self.state.string_prototype);
+        self.state.gc.allocate(object)
+    }
+
+    pub fn allocate_bool(&self, x: bool) -> Value {
+        let object = Object::with_prototype(ObjectValue::Bool(x), self.state.boolean_prototype);
+        self.state.gc.allocate(object)
     }
 }

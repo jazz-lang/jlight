@@ -7,20 +7,21 @@ use ahash::AHashMap;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 pub type RcState = Arc<State>;
+use super::value::Value;
 
 pub struct State {
     pub threads: Threads,
     pub gc: GlobalCollector,
-    pub nil_prototype: ObjectPointer,
-    pub boolean_prototype: ObjectPointer,
-    pub array_prototype: ObjectPointer,
-    pub object_prototype: ObjectPointer,
-    pub function_prototype: ObjectPointer,
-    pub number_prototype: ObjectPointer,
-    pub module_prototype: ObjectPointer,
-    pub string_prototype: ObjectPointer,
-    pub thread_prototype: ObjectPointer,
-    pub static_variables: AHashMap<String, ObjectPointer>,
+    pub nil_prototype: Value,
+    pub boolean_prototype: Value,
+    pub array_prototype: Value,
+    pub object_prototype: Value,
+    pub function_prototype: Value,
+    pub number_prototype: Value,
+    pub module_prototype: Value,
+    pub string_prototype: Value,
+    pub thread_prototype: Value,
+    pub static_variables: AHashMap<String, Value>,
 }
 
 impl State {

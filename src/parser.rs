@@ -153,12 +153,8 @@ impl<'a> Parser<'a> {
 
     fn parse_throw(&mut self) -> EResult {
         let pos = self.token.position;
-        if let TokenKind::String(s) = self.token.clone().kind {
-            self.advance_token()?;
-            return Ok(expr!(ExprKind::Throw(s.clone()), pos));
-        } else {
-            panic!("String expected at {}", pos)
-        }
+        self.advance_token()?;
+        Ok(expr!(ExprKind::Throw(self.parse_expression()?), pos))
     }
 
     fn parse_while(&mut self) -> EResult {

@@ -1,11 +1,7 @@
 use super::*;
 
-pub extern "C" fn array_init(
-    _: &Runtime,
-    x: ObjectPointer,
-    args: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
-    match &mut x.get_mut().value {
+pub extern "C" fn array_init(_: &Runtime, x: Value, args: &[Value]) -> Result<Value, Value> {
+    match &mut x.as_cell().get_mut().value {
         ObjectValue::Array(ref mut array) => {
             for value in args.iter() {
                 array.push(*value);
@@ -18,14 +14,10 @@ pub extern "C" fn array_init(
     Ok(x)
 }
 
-pub extern "C" fn array_length(
-    rt: &Runtime,
-    x: ObjectPointer,
-    _: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
-    assert!(!x.is_null());
-    match x.get().value {
-        ObjectValue::Array(ref x) => Ok(ObjectPointer::number(x.len() as f64)),
+pub extern "C" fn array_length(rt: &Runtime, x: Value, _: &[Value]) -> Result<Value, Value> {
+    assert!(!x.is_null_or_undefined());
+    match x.as_cell().get().value {
+        ObjectValue::Array(ref x) => Ok(Value::new_double(x.len() as f64)),
         _ => Err(rt.allocate_string(Arc::new("Not an array".to_owned()))),
     }
 }

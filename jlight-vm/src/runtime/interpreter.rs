@@ -30,7 +30,7 @@ macro_rules! catch {
 }
 
 impl Runtime {
-    pub fn run(&self, thread: &mut Arc<JThread>) -> ObjectPointer {
+    pub fn run(&self, thread: &mut Arc<JThread>) -> Value {
         let mut context: crate::util::ptr::Ptr<Context>;
         let mut index;
         let mut bindex;
@@ -43,10 +43,10 @@ impl Runtime {
             //println!("{}:{} {:?}", bindex, index, instruction);
             match instruction {
                 Instruction::LoadInt(r, val) => {
-                    context.set_register(r, ObjectPointer::number(val as i64 as f64))
+                    context.set_register(r, Value::new_double(val as i64 as f64))
                 }
                 Instruction::LoadNum(r, val) => {
-                    context.set_register(r, ObjectPointer::number(f64::from_bits(val)));
+                    context.set_register(r, Value::new_double(f64::from_bits(num)));
                 }
 
                 Instruction::Move(to, from) => {
@@ -837,24 +837,13 @@ impl Runtime {
                 }
                 Instruction::Not(r0, r1) => {
                     let r1 = context.get_register(r1);
-                    if r1.is_tagged_number() {
-                        context.set_register(
-                            r0,
-                            ObjectPointer::number(
-                                (!(r1.number_value().unwrap().floor() as i64)) as f64,
-                            ),
-                        );
+                    if r1.is_number() {
+                        context
+                            .set_register(r0, Value::new_double((!(r1.to_number() as i64)) as f64));
+                    } else if r1.is_bool() {
+                        context.set_register(r0, Value::from(VTag::True));
                     } else {
-                        match r1.get().value {
-                            ObjectValue::Bool(x) => {
-                                context.set_register(r0, self.allocate_bool(!x))
-                            }
-                            ObjectValue::Number(x) => context.set_register(
-                                r0,
-                                ObjectPointer::number((!(x.floor() as i64)) as f64),
-                            ),
-                            _ => context.set_register(r0, ObjectPointer::number(std::f64::NAN)),
-                        }
+                        context.set_register(r0, Value::new_double(-1.0));
                     }
                 }
                 Instruction::BoolAnd(r0, r1, r2) => {
@@ -876,19 +865,5 @@ impl Runtime {
                 x => panic!("{:?}", x),
             }
         }
-    }
-
-    pub fn allocate_null(&self) -> ObjectPointer {
-        self.state.nil_prototype
-    }
-
-    pub fn allocate_string(&self, s: Arc<String>) -> ObjectPointer {
-        let object = Object::with_prototype(ObjectValue::String(s), self.state.string_prototype);
-        self.state.gc.allocate(object)
-    }
-
-    pub fn allocate_bool(&self, x: bool) -> ObjectPointer {
-        let object = Object::with_prototype(ObjectValue::Bool(x), self.state.boolean_prototype);
-        self.state.gc.allocate(object)
     }
 }

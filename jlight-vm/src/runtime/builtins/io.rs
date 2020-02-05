@@ -1,10 +1,6 @@
 use super::*;
 
-pub extern "C" fn io_writeln(
-    _: &Runtime,
-    _: ObjectPointer,
-    args: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
+pub extern "C" fn io_writeln(_: &Runtime, _: Value, args: &[Value]) -> Result<Value, Value> {
     for (i, arg) in args.iter().enumerate() {
         print!("{}", arg.to_string());
         if i != args.len() - 1 {
@@ -12,21 +8,17 @@ pub extern "C" fn io_writeln(
         }
     }
     println!();
-    Ok(ObjectPointer::number(args.len() as f64))
+    Ok(Value::new_double(args.len() as f64))
 }
 
-pub extern "C" fn io_write(
-    _: &Runtime,
-    _: ObjectPointer,
-    args: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
+pub extern "C" fn io_write(_: &Runtime, _: Value, args: &[Value]) -> Result<Value, Value> {
     for (i, arg) in args.iter().enumerate() {
         print!("{}", arg.to_string());
         if i != args.len() - 1 {
             print!(" ");
         }
     }
-    Ok(ObjectPointer::number(args.len() as f64))
+    Ok(Value::new_double(args.len() as f64))
 }
 
 pub(super) fn register_io(state: &mut RcState) {

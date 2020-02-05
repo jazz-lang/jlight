@@ -5,6 +5,7 @@ use instructions::*;
 use jlight_vm::bytecode::*;
 use jlight_vm::runtime::module::*;
 use jlight_vm::runtime::object::*;
+use jlight_vm::runtime::value::*;
 use jlight_vm::util::arc::Arc;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -783,7 +784,10 @@ use jlight_vm::runtime::state::RcState;
 use jlight_vm::util::ptr::Ptr;
 pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
     let mut m = Arc::new(Module::new());
-    m.globals = Ptr::new(vec![ObjectPointer::null(); context.g.borrow().table.len()]);
+    m.globals = Ptr::new(vec![
+        Value::from(VTag::Undefined);
+        context.g.borrow().table.len()
+    ]);
 
     for (blocks, _, gid, params, name) in context.g.borrow().functions.iter() {
         let f = Function {
@@ -807,7 +811,7 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
                 let value = ObjectValue::String(Arc::new(x.to_owned()));
                 m.globals.get()[i] = state
                     .gc
-                    .allocate(Object::with_prototype(value, ObjectPointer::null()));
+                    .allocate(Object::with_prototype(value, Value::from(VTag::Null)));
             }
 
             _ => (),
@@ -830,13 +834,10 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
 
 pub fn disassemble_module(module: &Arc<Module>) {
     for global in module.globals.get().iter() {
-        if global.is_tagged_number() {
+        if !global.is_cell() {
             continue;
         }
-        if global.is_null() {
-            continue;
-        }
-        match global.get().value {
+        match global.as_cell().get().value {
             ObjectValue::Function(ref func) => {
                 println!("function {} (...)", func.name);
                 for (i, bb) in func.code.iter().enumerate() {

@@ -2,19 +2,16 @@ pub use crate::runtime;
 pub use crate::util::arc::Arc;
 pub use runtime::object::*;
 pub use runtime::state::*;
+pub use runtime::value::*;
 pub use runtime::Runtime;
 pub use runtime::*;
 pub mod array;
 pub mod io;
 pub mod thread;
 
-pub extern "C" fn builtin_gc(
-    rt: &Runtime,
-    _: ObjectPointer,
-    _: &[ObjectPointer],
-) -> Result<ObjectPointer, ObjectPointer> {
+pub extern "C" fn builtin_gc(rt: &Runtime, _: Value, _: &[Value]) -> Result<Value, Value> {
     rt.state.gc.collect(&rt.state);
-    Ok(ObjectPointer::number(0.0))
+    Ok(Value::new_double(0.0))
 }
 
 pub fn register_builtins(state: &mut RcState) {

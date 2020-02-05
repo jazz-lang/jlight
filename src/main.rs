@@ -20,7 +20,7 @@ fn main() {
     jlight::codegen::disassemble_module(&module);
     let execution_time = std::time::Instant::now();
     RUNTIME.state.threads.attach_current_thread();
-    RUNTIME.run_function(module.globals.get().last().unwrap().clone());
+    //RUNTIME.run_function(module.globals.get().last().unwrap().clone());
     let end = start_time.elapsed();
     let exec = execution_time.elapsed();
     println!(
