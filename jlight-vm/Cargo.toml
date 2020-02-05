@@ -16,7 +16,7 @@ num_cpus = "1.12"
 mimalloc = "0.1"
 fxhash = "0.2"
 color-backtrace = { version = "0.3", default-features = false }
-regalloc = {path = "regalloc.rs/lib/"}
+regalloc = "0.0.3"
 cfg-if = "0.1"
 [profile.release]
 lto = true
