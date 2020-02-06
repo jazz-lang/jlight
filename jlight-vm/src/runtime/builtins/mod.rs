@@ -1,5 +1,5 @@
 pub use crate::runtime;
-pub use crate::util::arc::Arc;
+pub use crate::util::shared::Arc;
 pub use runtime::object::*;
 pub use runtime::state::*;
 pub use runtime::value::*;
@@ -7,6 +7,7 @@ pub use runtime::Runtime;
 pub use runtime::*;
 pub mod array;
 pub mod io;
+#[cfg(feature = "multithreaded")]
 pub mod thread;
 
 pub extern "C" fn builtin_gc(rt: &Runtime, _: Value, _: &[Value]) -> Result<Value, Value> {
@@ -17,7 +18,10 @@ pub extern "C" fn builtin_gc(rt: &Runtime, _: Value, _: &[Value]) -> Result<Valu
 pub fn register_builtins(state: &mut RcState) {
     io::register_io(state);
     array::register_array(state);
-    thread::register_thread(state);
+    #[cfg(feature = "multithreaded")]
+    {
+        thread::register_thread(state);
+    }
     let f = new_native_fn(state, builtin_gc, 0);
     state.static_variables.insert("__gc".to_owned(), f);
 }

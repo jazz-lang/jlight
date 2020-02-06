@@ -1,9 +1,8 @@
+use super::ptr::Ptr;
 use std::cmp;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 /// The inner value of a pointer.
 ///
 /// This uses the C representation to ensure that the value is always the first
@@ -12,19 +11,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[repr(C)]
 pub struct Inner<T> {
     value: T,
-    references: AtomicUsize,
+    references: usize,
 }
 
-/// A thread-safe reference counted pointer.
-pub struct Arc<T> {
-    inner: NonNull<Inner<T>>,
+/// A reference counted pointer.
+pub struct Rc<T> {
+    inner: Ptr<Inner<T>>,
 }
 
-unsafe impl<T> Sync for Arc<T> {}
-unsafe impl<T> Send for Arc<T> {}
+unsafe impl<T> Sync for Rc<T> {}
+unsafe impl<T> Send for Rc<T> {}
 
-impl<T> Arc<T> {
-    /// Consumes the `Arc`, returning the wrapped pointer.
+impl<T> Rc<T> {
+    /// Consumes the `Rc`, returning the wrapped pointer.
     ///
     /// The returned pointer is in reality a pointer to the inner structure,
     /// instead of a pointer directly to the value.
@@ -34,41 +33,45 @@ impl<T> Arc<T> {
 
         mem::forget(value);
 
-        raw.as_ptr() as _
+        raw.0 as _
     }
 
-    /// Constructs an `Arc` from a raw pointer.
+    /// Constructs an `Rc` from a raw pointer.
     ///
     /// This method is incredibly unsafe, as it makes no attempt to verify if
     /// the pointer actually a pointer previously created using
-    /// `Arc::into_raw()`.
+    /// `Rc::into_raw()`.
     pub unsafe fn from_raw(value: *mut T) -> Self {
-        Arc {
-            inner: NonNull::new_unchecked(value as *mut Inner<T>),
+        Rc {
+            inner: Ptr(value as *mut Inner<T>),
         }
     }
 
     pub fn new(value: T) -> Self {
         let inner = Inner {
             value,
-            references: AtomicUsize::new(1),
+            references: 1,
         };
 
-        Arc {
-            inner: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(inner))) },
+        Rc {
+            inner: Ptr::new(inner),
         }
     }
 
     pub fn inner(&self) -> &Inner<T> {
-        unsafe { self.inner.as_ref() }
+        self.inner.get()
+    }
+
+    pub fn inner_mut(&self) -> &mut Inner<T> {
+        self.inner.get()
     }
 
     pub fn references(&self) -> usize {
-        self.inner().references.load(Ordering::SeqCst)
+        self.inner().references
     }
 
     pub fn as_ptr(&self) -> *mut T {
-        self.inner.as_ptr() as _
+        self.inner.0 as _
     }
 
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
@@ -76,7 +79,7 @@ impl<T> Arc<T> {
     }
 }
 
-impl<T> Deref for Arc<T> {
+impl<T> Deref for Rc<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -84,67 +87,69 @@ impl<T> Deref for Arc<T> {
     }
 }
 
-impl<T> DerefMut for Arc<T> {
+impl<T> DerefMut for Rc<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut self.inner.as_mut().value }
+        &mut self.inner.get().value
     }
 }
 
-impl<T> Clone for Arc<T> {
-    fn clone(&self) -> Arc<T> {
-        self.inner().references.fetch_add(1, Ordering::Relaxed);
+impl<T> Clone for Rc<T> {
+    fn clone(&self) -> Rc<T> {
+        self.inner_mut().references += 1;
 
-        Arc { inner: self.inner }
+        Rc { inner: self.inner }
     }
 }
 
-impl<T> Drop for Arc<T> {
+impl<T> Drop for Rc<T> {
     fn drop(&mut self) {
         unsafe {
-            if self.inner().references.fetch_sub(1, Ordering::AcqRel) == 1 {
-                let _ = Box::from_raw(self.inner.as_mut());
+            self.inner_mut().references -= 1;
+            if self.inner_mut().references == 1 {
+                let _ = Box::from_raw(self.inner.0);
             }
         }
     }
 }
 
-impl<T: PartialOrd> PartialOrd for Arc<T> {
+impl<T: PartialOrd> PartialOrd for Rc<T> {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         (**self).partial_cmp(&**other)
     }
 }
 
-impl<T: Ord> Ord for Arc<T> {
+impl<T: Ord> Ord for Rc<T> {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         (**self).cmp(&**other)
     }
 }
 
-impl<T: PartialEq> PartialEq for Arc<T> {
+impl<T: PartialEq> PartialEq for Rc<T> {
     fn eq(&self, other: &Self) -> bool {
         (**self) == (**other)
     }
 }
 
-impl<T: Eq> Eq for Arc<T> {}
+impl<T: Eq> Eq for Rc<T> {}
 
 use std::hash::{Hash, Hasher};
 
-impl<T: Hash> Hash for Arc<T> {
+impl<T: Hash> Hash for Rc<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (**self).hash(state);
+        assert!(!self.inner.is_null());
+        self.inner.get().value.hash(state);
     }
 }
 
 use std::fmt;
 
-impl<T: fmt::Debug> fmt::Debug for Arc<T> {
+impl<T: fmt::Debug> fmt::Debug for Rc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", **self)
     }
 }
 
-impl<T: fmt::Display> fmt::Display for Arc<T> {
+impl<T: fmt::Display> fmt::Display for Rc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", **self)
     }

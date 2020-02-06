@@ -9,7 +9,7 @@ pub mod string_pool;
 pub mod threaded_interpreter;
 pub mod threads;
 pub mod value;
-use crate::util::arc::Arc;
+use crate::util::shared::Arc;
 use module::*;
 use object::*;
 use state::*;
@@ -17,7 +17,11 @@ use threads::*;
 use value::*;
 pub struct Runtime {
     pub state: RcState,
-    pub registry: crate::util::arc::Arc<ModuleRegistry>,
+    pub registry: crate::util::shared::Arc<ModuleRegistry>,
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {}
 }
 
 lazy_static::lazy_static! {

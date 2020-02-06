@@ -6,9 +6,9 @@ use jlight_vm::bytecode::*;
 use jlight_vm::runtime::module::*;
 use jlight_vm::runtime::object::*;
 use jlight_vm::runtime::value::*;
-use jlight_vm::util::arc::Arc;
-use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use jlight_vm::util::shared::Arc;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 

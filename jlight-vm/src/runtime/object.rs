@@ -1,7 +1,7 @@
 use super::module::Module;
 use super::value::*;
 use crate::runtime::state::{RcState, State};
-use crate::util::arc::Arc;
+use crate::util::shared::Arc;
 use crate::util::tagged_pointer::*;
 use ahash::AHashMap;
 use std::fs;
@@ -273,8 +273,7 @@ impl ObjectPointer {
             return;
         }
         unsafe {
-            std::ptr::drop_in_place(self.raw.raw);
-            std::alloc::dealloc(self.raw.raw as *mut u8, std::alloc::Layout::new::<Object>());
+            let _ = Box::from_raw(self.raw.raw);
         }
     }
 
@@ -549,7 +548,7 @@ impl Object {
     /// Adds a new attribute to the current object.
     pub fn add_attribute(&mut self, name: Arc<String>, object: Value) {
         self.allocate_attributes_map();
-
+        assert!(name.references() != 0);
         self.attributes_map_mut().unwrap().insert(name, object);
     }
 

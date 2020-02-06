@@ -1,16 +1,32 @@
 use super::context::*;
-use crate::util::arc::Arc;
 use crate::util::ptr::Ptr;
-use parking_lot::{Condvar, Mutex};
-use std::cell::RefCell;
+use crate::util::shared::Arc;
+use crate::util::shared::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+pub struct ThreadPtr(Ptr<Arc<JThread>>);
+
 thread_local! {
-    pub static THREAD: Ptr<Arc<JThread>> = {
+    pub static THREAD:ThreadPtr = {
         let thread = JThread::new();
         thread.local_data_mut().native = true;
-        Ptr::new(thread)
+        ThreadPtr(Ptr::new(thread))
     };
+}
+
+impl std::ops::Deref for ThreadPtr {
+    type Target = Ptr<Arc<JThread>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for ThreadPtr {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = Box::from_raw((self.0).0);
+        }
+    }
 }
 
 /// Thread local data in JLight.
@@ -96,11 +112,13 @@ impl Drop for JThread {
         while let Some(ccontext) = context {
             let parent = ccontext.parent;
             unsafe {
-                std::ptr::drop_in_place(ccontext.0);
+                let _ = Box::from_raw(ccontext.0);
             }
             context = parent;
         }
-        unsafe { std::ptr::drop_in_place(self.local_data.0) }
+        unsafe {
+            let _ = Box::from_raw(self.local_data.0);
+        }
     }
 }
 
@@ -112,7 +130,7 @@ pub struct Threads {
 impl Threads {
     pub fn new() -> Threads {
         Threads {
-            threads: Mutex::new(Vec::new()),
+            threads: Mutex::<Vec<Arc<JThread>>>::new(Vec::new()),
             cond_join: Condvar::new(),
         }
     }
@@ -129,6 +147,10 @@ impl Threads {
         threads.push(thread);
     }
 
+    pub fn detach_thread(&self, thread: Arc<JThread>) {
+        let mut threads = self.threads.lock();
+        threads.retain(|elem| !Arc::ptr_eq(elem, &thread));
+    }
     pub fn detach_current_thread(&self) {
         THREAD.with(|thread| {
             let mut threads = self.threads.lock();

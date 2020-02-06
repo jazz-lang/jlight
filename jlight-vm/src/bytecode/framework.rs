@@ -248,3 +248,11 @@ pub fn regalloc(f: &mut BytecodeFunction) {
         MAPED = false;
     }
 }
+
+impl Drop for BytecodeFunction {
+    fn drop(&mut self) {
+        unsafe {
+            //let _ = Box::from_raw(self.stack_positions.0);
+        }
+    }
+}

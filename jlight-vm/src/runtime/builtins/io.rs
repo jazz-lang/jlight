@@ -23,10 +23,8 @@ pub extern "C" fn io_write(_: &Runtime, _: Value, args: &[Value]) -> Result<Valu
 
 pub(super) fn register_io(state: &mut RcState) {
     let io_object = state.gc.allocate(Object::new(ObjectValue::None));
-    io_object.add_attribute(
-        &Arc::new(String::from("writeln")),
-        new_native_fn(state, io_writeln, -1),
-    );
+    let writeln = Arc::new("writeln".to_owned());
+    io_object.add_attribute(&writeln, new_native_fn(state, io_writeln, -1));
     io_object.add_attribute(
         &Arc::new(String::from("write")),
         new_native_fn(state, io_write, -1),

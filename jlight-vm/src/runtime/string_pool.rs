@@ -1,6 +1,5 @@
-use crate::util::arc::Arc;
+use crate::util::shared::{Arc, Mutex};
 use fxhash::FxHashMap;
-use parking_lot::Mutex;
 use std::{borrow::Borrow, fmt, ops::Deref};
 
 lazy_static::lazy_static! {

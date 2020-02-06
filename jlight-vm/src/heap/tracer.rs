@@ -1,5 +1,5 @@
 use crate::runtime::object::*;
-use crate::util::arc::Arc;
+use crate::util::shared::Arc;
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 pub struct Pool {
     /// A global queue to steal jobs from.
@@ -53,6 +53,7 @@ impl Pool {
             .into_iter()
             .map(|worker| Tracer::new(worker, state.clone()))
             .collect::<Vec<_>>();
+        let start = std::time::Instant::now();
         tracers.into_iter().enumerate().for_each(|(idx, tracer)| {
             let recv = state.get_state().recv.clone();
             let send = state.get_state().msend.clone();
@@ -61,11 +62,15 @@ impl Pool {
                 .spawn(move || loop {
                     match recv.recv() {
                         Ok(Message::Execute) => {
+                            trace!(
+                                "{}: execution message received",
+                                std::thread::current().name().unwrap()
+                            );
                             tracer.trace();
                             send.send(()).unwrap();
                         }
                         Ok(Message::Shutdown) => {
-                            println!("shutdown");
+                            trace!("{}: shutdown", std::thread::current().name().unwrap());
                             break;
                         }
                         _ => panic!(),
@@ -73,6 +78,11 @@ impl Pool {
                 })
                 .unwrap();
         });
+        trace!(
+            "Spawned {} GC worker threads in {}ns",
+            threads,
+            start.elapsed().as_nanos()
+        );
         state
     }
 
@@ -132,6 +142,11 @@ impl Tracer {
             if pointer.is_marked() {
                 continue;
             }
+            trace!(
+                "{}: Tracing 0x{:p}",
+                std::thread::current().name().unwrap(),
+                pointer.raw.raw
+            );
             pointer.mark();
             self.schedule_child_pointers(*pointer);
         }

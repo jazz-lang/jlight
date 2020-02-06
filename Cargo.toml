@@ -12,3 +12,7 @@ jlight-vm = {path = "jlight-vm"}
 regalloc = "0.0.3"
 hashlink = "0.4"
 
+[profile.release]
+opt-level = 2
+lto = true
+debug = true

@@ -2,10 +2,10 @@ use super::threads::*;
 use crate::heap::global::*;
 use crate::heap::tracer::*;
 use crate::runtime::object::*;
-use crate::util::arc::Arc;
+use crate::util::shared::*;
 use ahash::AHashMap;
-use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 pub type RcState = Arc<State>;
 use super::value::Value;
 
@@ -26,11 +26,21 @@ pub struct State {
 
 impl State {
     pub fn new() -> Self {
+        #[inline]
+        fn nof_parallel_worker_threads(num: usize, den: usize, switch_pt: usize) -> usize {
+            let ncpus = num_cpus::get();
+            if ncpus <= switch_pt {
+                ncpus
+            } else {
+                switch_pt + ((ncpus - switch_pt) * num) / den
+            }
+        }
+
         let gc = GlobalCollector {
             heap: Mutex::new(vec![]),
             threshold: AtomicUsize::new(4096 * 10),
             bytes_allocated: AtomicUsize::new(0),
-            pool: Pool::new(num_cpus::get() / 2),
+            pool: Pool::new(nof_parallel_worker_threads(5, 8, 8)),
             collecting: AtomicBool::new(false),
         };
         let nil_prototype = gc.allocate(Object::new(ObjectValue::None));
@@ -79,5 +89,24 @@ impl State {
         for (_, var) in self.static_variables.iter() {
             cb(var.pointer());
         }
+    }
+}
+
+impl Drop for State {
+    fn drop(&mut self) {
+        /*self.nil_prototype.as_cell().finalize();
+        self.boolean_prototype.as_cell().finalize();
+        self.array_prototype.as_cell().finalize();
+        self.function_prototype.as_cell().finalize();
+        self.object_prototype.as_cell().finalize();
+        self.number_prototype.as_cell().finalize();
+        self.module_prototype.as_cell().finalize();
+        self.string_prototype.as_cell().finalize();
+        for (_, value) in self.static_variables.iter() {
+            if value.is_cell() {
+                value.as_cell().finalize();
+            }
+        }*/
+        self.static_variables.clear();
     }
 }

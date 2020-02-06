@@ -23,12 +23,12 @@ pub extern "C" fn array_length(rt: &Runtime, x: Value, _: &[Value]) -> Result<Va
 }
 
 pub(super) fn register_array(state: &mut RcState) {
-    state.array_prototype.add_attribute(
-        &Arc::new("init".to_owned()),
-        new_native_fn(state, array_init, -1),
-    );
-    state.array_prototype.add_attribute(
-        &Arc::new("length".to_owned()),
-        new_native_fn(state, array_length, 0),
-    );
+    let init = Arc::new("init".to_owned());
+    state
+        .array_prototype
+        .add_attribute(&init, new_native_fn(state, array_init, -1));
+    let length = Arc::new("length".to_owned());
+    state
+        .array_prototype
+        .add_attribute(&length, new_native_fn(state, array_length, 0));
 }

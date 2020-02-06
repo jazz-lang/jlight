@@ -1,12 +1,9 @@
 use super::module::Module;
 use super::object::*;
-use super::state::*;
 use super::value::*;
 use crate::bytecode::block::BasicBlock;
-use crate::bytecode::instructions::Instruction;
-use crate::util::arc::Arc;
-use crate::util::deref_ptr::DerefPointer;
 use crate::util::ptr::*;
+use crate::util::shared::Arc;
 
 pub struct CatchEntry {
     pub register: u16,
@@ -28,8 +25,7 @@ pub struct Context {
     pub parent: Option<Ptr<Context>>,
     pub function: Value,
 }
-use fxhash::FxBuildHasher;
-use std::collections::HashMap;
+
 impl Context {
     pub fn new() -> Self {
         Self {
@@ -90,7 +86,6 @@ impl Context {
             return_register: None,
             terminate_upon_return: false,
             module: Arc::new(Module {
-                labels: HashMap::with_hasher(FxBuildHasher::default()),
                 globals: Ptr::null(),
             }),
             code: Ptr::null(),

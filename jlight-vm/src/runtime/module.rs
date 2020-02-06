@@ -1,21 +1,27 @@
-use super::object::*;
 use super::state::*;
 use super::value::*;
-use crate::bytecode::block::BasicBlock;
-use crate::util::deref_ptr::DerefPointer;
 use crate::util::ptr::Ptr;
 use fxhash::FxHashMap;
 
 pub struct Module {
     pub globals: Ptr<Vec<Value>>,
-    pub labels: FxHashMap<u16, DerefPointer<BasicBlock>>,
 }
 
 impl Module {
     pub fn new() -> Self {
         Self {
             globals: Ptr::null(),
-            labels: FxHashMap::with_hasher(fxhash::FxBuildHasher::default()),
+        }
+    }
+}
+
+impl Drop for Module {
+    fn drop(&mut self) {
+        if self.globals.is_null() {
+            return;
+        }
+        unsafe {
+            let _ = Box::from_raw(self.globals.0);
         }
     }
 }
@@ -32,4 +38,8 @@ impl ModuleRegistry {
             parsed: FxHashMap::with_hasher(fxhash::FxBuildHasher::default()),
         }
     }
+}
+
+impl Drop for ModuleRegistry {
+    fn drop(&mut self) {}
 }

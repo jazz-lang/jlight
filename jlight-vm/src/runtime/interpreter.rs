@@ -4,7 +4,7 @@ use super::threads::*;
 use super::*;
 use crate::bytecode::{block::BasicBlock, instructions::Instruction};
 use crate::heap::global::safepoint;
-use crate::util::arc::Arc;
+use crate::util::shared::Arc;
 use context::*;
 use object::*;
 macro_rules! reset_context {

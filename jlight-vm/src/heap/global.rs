@@ -3,8 +3,8 @@ use crate::runtime::object::*;
 use crate::runtime::state::*;
 use crate::runtime::threads::JThread;
 use crate::runtime::value::*;
-use crate::util::arc::Arc;
-use parking_lot::Mutex;
+
+use crate::util::shared::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 const INITIAL_THRESHOLD: usize = 100;
 
@@ -32,6 +32,7 @@ impl GlobalCollector {
                 object.unmark();
             } else {
                 allocated -= std::mem::size_of::<Object>();
+                trace!("GC: Sweep 0x{:p}", object.raw.raw);
                 object.finalize();
             }
 
@@ -98,69 +99,98 @@ impl GlobalCollector {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref GLOBAL: GlobalCollector = GlobalCollector {
-        heap: Mutex::new(vec![]),
-        threshold: AtomicUsize::new(INITIAL_THRESHOLD),
-        bytes_allocated: AtomicUsize::new(0),
-        pool: Pool::new(num_cpus::get() / 2),
-        collecting: AtomicBool::new(true),
-    };
+impl Drop for GlobalCollector {
+    fn drop(&mut self) {
+        //let mut heap = self.heap.lock();
+        //let heap: &mut Vec<ObjectPointer> = &mut *heap;
+        //while let Some(value) = heap.pop() {
+        //let _ = value.finalize();
+        //}
+    }
+}
 
+lazy_static::lazy_static! {
     static ref STW: StopTheWorld = StopTheWorld {
         blocking: Mutex::new(0),
-        cnd: parking_lot::Condvar::new()
+        cnd: Condvar::new()
     };
 }
 
 const GC_YIELD_MAX_ATTEMPT: u64 = 2;
-/// Stop-the-World pause mechanism. During safepoint all threads running jlight vm bytecode are suspended.
-pub fn safepoint(state: &State) {
-    if state.gc.collecting.load(Ordering::Relaxed) {
-        let mut blocking = STW.blocking.lock();
-        assert!(*blocking > 0);
-        *blocking -= 1;
-        if *blocking == 0 {
-            STW.cnd.notify_all();
-        }
-        let mut attempt = 0;
-        while state.gc.collecting.load(Ordering::Relaxed) {
-            if attempt >= 2 {
-                std::thread::sleep(std::time::Duration::from_micros(
-                    (attempt - GC_YIELD_MAX_ATTEMPT) * 1000,
-                ));
+
+cfg_if::cfg_if!(
+    if #[cfg(feature="multithreaded")] {
+        
+        /// Stop-the-World pause mechanism. During safepoint all threads running jlight vm bytecode are suspended.
+        pub fn safepoint(state: &State) {
+            if state.gc.collecting.load(Ordering::Relaxed) {
+                trace!("Safepoint reached, waiting GC to finish");
+                let mut blocking = STW.blocking.lock();
+                assert!(*blocking > 0);
+                *blocking -= 1;
+                if *blocking == 0 {
+                    STW.cnd.notify_all();
+                }
+                let mut attempt = 0;
+                while state.gc.collecting.load(Ordering::Relaxed) {
+                    if attempt >= 2 {
+                        std::thread::sleep(std::time::Duration::from_micros(
+                            (attempt - GC_YIELD_MAX_ATTEMPT) * 1000,
+                        ));
+                    } else {
+                        std::thread::yield_now();
+                    }
+                    attempt += 1;
+                }
+            } else if state.gc.should_collect() {
+                trace!("Safepoint reached, triggering collection");
+                state.gc.collect(state);
             } else {
-                std::thread::yield_now();
+                trace!("Safepoint reached, no need for collection");
             }
-            attempt += 1;
         }
-    } else if state.gc.should_collect() {
-        state.gc.collect(state);
+    } else {
+        pub fn safepoint(state: &State) {
+            if state.gc.should_collect() {
+                state.gc.collect(state);
+            }
+        }
     }
-}
+);
 
 struct StopTheWorld {
     blocking: Mutex<usize>,
-    cnd: parking_lot::Condvar,
+    cnd: Condvar,
 }
+cfg_if::cfg_if!(
+    if #[cfg(feature="multithreaded")] {
+        fn stop_the_world<F: FnMut(&JThread)>(state: &State, mut cb: F) {
+            // lock threads from starting or exiting
+            let threads = state.threads.threads.lock();
+            std::sync::atomic::fence(Ordering::SeqCst);
 
-fn stop_the_world<F: FnMut(&JThread)>(state: &State, mut cb: F) {
-    // lock threads from starting or exiting
-    let threads = state.threads.threads.lock();
-    std::sync::atomic::fence(Ordering::SeqCst);
+            let mut blocking = STW.blocking.lock();
 
-    let mut blocking = STW.blocking.lock();
+            let native_threads_count =
+                threads
+                    .iter()
+                    .fold(0, |c, x| if x.local_data().native { c + 1 } else { c });
+            *blocking = native_threads_count - 1;
+            while *blocking > 0 {
+                trace!("STW: Waiting for {} thread(s)", blocking);
+                STW.cnd.wait(&mut blocking);
+            }
 
-    let native_threads_count =
-        threads
-            .iter()
-            .fold(0, |c, x| if x.local_data().native { c + 1 } else { c });
-    *blocking = native_threads_count - 1;
-    while *blocking > 0 {
-        STW.cnd.wait(&mut blocking);
+            for thread in threads.iter() {
+                cb(thread);
+            }
+        }
+    } else {
+        fn stop_the_world<F: FnMut(&JThread)>(state: &State,mut cb: F) {
+            let threads = state.threads.threads.lock();
+            for thread in threads.iter() {
+                cb(thread);
+            }
+        }
     }
-
-    for thread in threads.iter() {
-        cb(thread);
-    }
-}
+);
