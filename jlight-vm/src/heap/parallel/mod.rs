@@ -1,12 +1,14 @@
-use super::tracer::*;
+pub mod tracer;
+
 use crate::runtime::object::*;
 use crate::runtime::state::*;
 use crate::runtime::threads::JThread;
 use crate::runtime::value::*;
+use tracer::*;
 
 use crate::util::shared::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-const INITIAL_THRESHOLD: usize = 100;
+const INITIAL_THRESHOLD: usize = 4096; // 4kb;
 
 // after collection we want the the ratio of used/total to be no
 // greater than this (the threshold grows exponentially, to avoid
@@ -14,7 +16,11 @@ const INITIAL_THRESHOLD: usize = 100;
 // number of `new` calls):
 const USED_SPACE_RATIO: f64 = 0.7;
 
-pub struct GlobalCollector {
+/// Parallel mark&sweep GC.
+///
+/// This GC is stop-the-world mark&sweep. When collection happens
+/// this GC uses additional worker threads to trace heap, it's recommended to use this GC if you have large heap.
+pub struct ParallelCollector {
     pub heap: Mutex<Vec<ObjectPointer>>,
     pub threshold: AtomicUsize,
     pub bytes_allocated: AtomicUsize,
@@ -22,14 +28,23 @@ pub struct GlobalCollector {
     pub collecting: AtomicBool,
 }
 
-impl GlobalCollector {
+impl ParallelCollector {
+    pub fn new(workers: usize) -> Self {
+        Self {
+            heap: Mutex::new(vec![]),
+            threshold: AtomicUsize::new(INITIAL_THRESHOLD),
+            bytes_allocated: AtomicUsize::new(INITIAL_THRESHOLD),
+            pool: Pool::new(workers),
+            collecting: AtomicBool::new(false),
+        }
+    }
     pub fn sweep(&self) {
         let mut heap = self.heap.lock();
         let mut allocated = self.bytes_allocated.load(Ordering::Acquire);
         heap.retain(|object| {
-            let retain = object.is_marked();
+            let retain = object.get_color() == COLOR_BLACK;
             if retain {
-                object.unmark();
+                object.set_color(COLOR_WHITE);
             } else {
                 allocated -= std::mem::size_of::<Object>();
                 trace!("GC: Sweep 0x{:p}", object.raw.raw);
@@ -57,7 +72,7 @@ impl GlobalCollector {
         state.each_pointer(|object| {
             self.pool.schedule(object);
         });
-        stop_the_world(state, |thread| {
+        super::stop_the_world(state, |thread: &crate::runtime::threads::JThread| {
             thread.each_pointer(|object| {
                 //stack.push(object);
                 self.pool.schedule(object);
@@ -78,11 +93,11 @@ impl GlobalCollector {
         self.collecting.store(false, Ordering::Release);
     }
 
-    pub fn should_collect(&self) -> bool {
+    pub fn should_collect_(&self) -> bool {
         self.bytes_allocated.load(Ordering::Acquire) > self.threshold.load(Ordering::Acquire)
     }
 
-    pub fn allocate(&self, object: Object) -> crate::runtime::value::Value {
+    pub fn allocate_(&self, object: Object) -> crate::runtime::value::Value {
         unsafe {
             let mut heap = self.heap.lock();
             let pointer = std::alloc::alloc(std::alloc::Layout::new::<Object>()).cast::<Object>();
@@ -99,7 +114,7 @@ impl GlobalCollector {
     }
 }
 
-impl Drop for GlobalCollector {
+impl Drop for ParallelCollector {
     fn drop(&mut self) {
         //let mut heap = self.heap.lock();
         //let heap: &mut Vec<ObjectPointer> = &mut *heap;
@@ -109,88 +124,22 @@ impl Drop for GlobalCollector {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref STW: StopTheWorld = StopTheWorld {
-        blocking: Mutex::new(0),
-        cnd: Condvar::new()
-    };
-}
-
-const GC_YIELD_MAX_ATTEMPT: u64 = 2;
-
-cfg_if::cfg_if!(
-    if #[cfg(feature="multithreaded")] {
-        
-        /// Stop-the-World pause mechanism. During safepoint all threads running jlight vm bytecode are suspended.
-        pub fn safepoint(state: &State) {
-            if state.gc.collecting.load(Ordering::Relaxed) {
-                trace!("Safepoint reached, waiting GC to finish");
-                let mut blocking = STW.blocking.lock();
-                assert!(*blocking > 0);
-                *blocking -= 1;
-                if *blocking == 0 {
-                    STW.cnd.notify_all();
-                }
-                let mut attempt = 0;
-                while state.gc.collecting.load(Ordering::Relaxed) {
-                    if attempt >= 2 {
-                        std::thread::sleep(std::time::Duration::from_micros(
-                            (attempt - GC_YIELD_MAX_ATTEMPT) * 1000,
-                        ));
-                    } else {
-                        std::thread::yield_now();
-                    }
-                    attempt += 1;
-                }
-            } else if state.gc.should_collect() {
-                trace!("Safepoint reached, triggering collection");
-                state.gc.collect(state);
-            } else {
-                trace!("Safepoint reached, no need for collection");
-            }
-        }
-    } else {
-        pub fn safepoint(state: &State) {
-            if state.gc.should_collect() {
-                state.gc.collect(state);
-            }
-        }
+impl super::GarbageCollector for ParallelCollector {
+    fn collecting(&self) -> bool {
+        self.collecting.load(Ordering::Acquire)
     }
-);
-
-struct StopTheWorld {
-    blocking: Mutex<usize>,
-    cnd: Condvar,
-}
-cfg_if::cfg_if!(
-    if #[cfg(feature="multithreaded")] {
-        fn stop_the_world<F: FnMut(&JThread)>(state: &State, mut cb: F) {
-            // lock threads from starting or exiting
-            let threads = state.threads.threads.lock();
-            std::sync::atomic::fence(Ordering::SeqCst);
-
-            let mut blocking = STW.blocking.lock();
-
-            let native_threads_count =
-                threads
-                    .iter()
-                    .fold(0, |c, x| if x.local_data().native { c + 1 } else { c });
-            *blocking = native_threads_count - 1;
-            while *blocking > 0 {
-                trace!("STW: Waiting for {} thread(s)", blocking);
-                STW.cnd.wait(&mut blocking);
-            }
-
-            for thread in threads.iter() {
-                cb(thread);
-            }
-        }
-    } else {
-        fn stop_the_world<F: FnMut(&JThread)>(state: &State,mut cb: F) {
-            let threads = state.threads.threads.lock();
-            for thread in threads.iter() {
-                cb(thread);
-            }
-        }
+    fn minor_collection(&self, state: &State) {
+        self.collect(state);
     }
-);
+    fn major_collection(&self, state: &State) {
+        self.collect(state);
+    }
+
+    fn allocate(&self, object: Object) -> Value {
+        self.allocate_(object)
+    }
+
+    fn should_collect(&self) -> bool {
+        self.should_collect_()
+    }
+}

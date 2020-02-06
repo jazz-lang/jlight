@@ -19,6 +19,11 @@ color-backtrace = { version = "0.3", default-features = false }
 regalloc = "0.0.3"
 cfg-if = "0.1"
 log = "0.4"
+libc = "0.2.66"
+[target.'cfg(target_family = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["winuser","memoryapi","errhandlingapi","processthreadsapi","synchapi","sysinfoapi"] }
+kernel32-sys = "0.2"
+
 [profile.release]
 lto = true
 opt-level = 2

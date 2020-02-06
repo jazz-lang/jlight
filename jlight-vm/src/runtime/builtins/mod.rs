@@ -11,7 +11,7 @@ pub mod io;
 pub mod thread;
 
 pub extern "C" fn builtin_gc(rt: &Runtime, _: Value, _: &[Value]) -> Result<Value, Value> {
-    rt.state.gc.collect(&rt.state);
+    rt.state.gc.minor_collection(&rt.state);
     Ok(Value::new_double(0.0))
 }
 

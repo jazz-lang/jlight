@@ -294,35 +294,21 @@ impl Value {
         std::f64::NAN
     }
 
-    pub fn is_marked(&self) -> bool {
+    pub fn get_color(&self) -> u8 {
         if !self.is_cell() {
-            true
-        } else {
-            self.as_cell().get().marked.load(Ordering::Acquire)
+            panic!();
         }
+        self.as_cell().get_color()
     }
 
-    pub fn mark(&mut self) {
-        if !self.is_cell() {
-            return;
-        }
-
-        self.as_cell()
-            .get_mut()
-            .marked
-            .store(true, Ordering::Release);
-    }
-
-    pub fn unmark(&mut self) {
+    pub fn set_color(&self, color: u8) {
         if !self.is_cell() {
             return;
         }
 
-        self.as_cell()
-            .get_mut()
-            .marked
-            .store(false, Ordering::Relaxed)
+        self.as_cell().set_color(color);
     }
+
     pub fn prototype(&self, state: &State) -> Option<Value> {
         if self.is_tagged_number() {
             Some(state.number_prototype)

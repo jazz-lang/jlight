@@ -139,7 +139,10 @@ impl Tracer {
             if pointer.is_null() {
                 continue;
             }
-            if pointer.is_marked() {
+            if pointer.is_tagged_number() {
+                continue;
+            }
+            if pointer.get_color() == COLOR_BLACK {
                 continue;
             }
             trace!(
@@ -147,7 +150,7 @@ impl Tracer {
                 std::thread::current().name().unwrap(),
                 pointer.raw.raw
             );
-            pointer.mark();
+            pointer.set_color(COLOR_BLACK);
             self.schedule_child_pointers(*pointer);
         }
     }

@@ -5,7 +5,7 @@ use crate::util::shared::Arc;
 use crate::util::tagged_pointer::*;
 use ahash::AHashMap;
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 pub enum ObjectValue {
     None,
     Number(f64),
@@ -19,11 +19,15 @@ pub enum ObjectValue {
     Thread(Option<std::thread::JoinHandle<Value>>),
 }
 
+pub const COLOR_WHITE: u8 = 0x0;
+pub const COLOR_GREY: u8 = 0x1;
+pub const COLOR_BLACK: u8 = 0x2;
+
 pub struct Object {
     pub prototype: Value,
     pub attributes: TaggedPointer<AHashMap<Arc<String>, Value>>,
     pub value: ObjectValue,
-    pub marked: AtomicBool,
+    pub color: AtomicU8,
 }
 
 #[derive(Clone, Copy)]
@@ -105,13 +109,6 @@ impl ObjectPointer {
         }
     }
 
-    pub fn is_marked(&self) -> bool {
-        if self.is_tagged_number() {
-            true
-        } else {
-            self.get().marked.load(Ordering::Relaxed)
-        }
-    }
     pub fn prototype(&self, state: &State) -> Option<Value> {
         if self.is_tagged_number() {
             Some(state.number_prototype)
@@ -185,20 +182,12 @@ impl ObjectPointer {
         }
     }
 
-    pub fn mark(&self) {
-        if self.is_tagged_number() {
-            unreachable!()
-        }
-        let x = self.get_mut();
-        x.marked.store(true, Ordering::Release);
+    pub fn set_color(&self, color: u8) {
+        self.get_mut().color.store(color, Ordering::Release);
     }
 
-    pub fn unmark(&self) {
-        if self.is_tagged_number() {
-            unreachable!()
-        }
-        let x = self.get_mut();
-        x.marked.store(true, Ordering::Release);
+    pub fn get_color(&self) -> u8 {
+        self.get_mut().color.load(Ordering::Acquire)
     }
 
     pub fn as_string(&self) -> Result<&Arc<String>, String> {
@@ -273,7 +262,24 @@ impl ObjectPointer {
             return;
         }
         unsafe {
-            let _ = Box::from_raw(self.raw.raw);
+            match self.raw.raw.read().value {
+                ObjectValue::File(x) => {
+                    drop(x);
+                }
+                ObjectValue::Array(values) => {
+                    drop(values);
+                }
+                ObjectValue::ByteArray(values) => {
+                    drop(values);
+                }
+                ObjectValue::Function(f) => {
+                    drop(f);
+                }
+                ObjectValue::Module(x) => drop(x),
+                ObjectValue::String(x) => drop(x),
+                ObjectValue::Thread(x) => drop(x),
+                _ => (),
+            }
         }
     }
 
@@ -330,7 +336,7 @@ impl Object {
             prototype: Value::from(VTag::Null),
             attributes: TaggedPointer::null(),
             value,
-            marked: AtomicBool::new(false),
+            color: AtomicU8::new(0),
         }
     }
 
@@ -344,7 +350,7 @@ impl Object {
             prototype,
             attributes: TaggedPointer::null(),
             value,
-            marked: AtomicBool::new(false),
+            color: AtomicU8::new(0),
         }
     }
     pub fn each_pointer<F: FnMut(ObjectPointerPointer)>(&self, mut callback: F) {

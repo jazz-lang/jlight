@@ -1,6 +1,5 @@
 use super::threads::*;
-use crate::heap::global::*;
-use crate::heap::tracer::*;
+use crate::heap::*;
 use crate::runtime::object::*;
 use crate::util::shared::*;
 use ahash::AHashMap;
@@ -9,9 +8,55 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 pub type RcState = Arc<State>;
 use super::value::Value;
 
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
+pub enum GCType {
+    Parallel,
+    Serial,
+    Concurrent,
+    Uninit,
+}
+
+static mut GC_TYPE: GCType = GCType::Serial;
+
+pub fn init_gc(ty: GCType) {
+    unsafe {
+        if GC_TYPE == GCType::Uninit {
+            GC_TYPE = ty;
+        } else {
+            panic!("GC Already initialized");
+        }
+    }
+}
+
+#[inline]
+fn nof_parallel_worker_threads(num: usize, den: usize, switch_pt: usize) -> usize {
+    let ncpus = num_cpus::get_physical();
+    if ncpus <= switch_pt {
+        if ncpus <= 1 {
+            return 2;
+        }
+        ncpus
+    } else {
+        switch_pt + ((ncpus - switch_pt) * num) / den
+    }
+}
+
+fn build_gc() -> Box<dyn GarbageCollector> {
+    if unsafe { GC_TYPE == GCType::Uninit } {
+        init_gc(GCType::Parallel);
+    }
+    match unsafe { GC_TYPE } {
+        GCType::Parallel => {
+            let workers = nof_parallel_worker_threads(5, 8, 8);
+            Box::new(parallel::ParallelCollector::new(workers))
+        }
+        _ => unimplemented!(),
+    }
+}
+
 pub struct State {
     pub threads: Threads,
-    pub gc: GlobalCollector,
+    pub gc: Box<dyn GarbageCollector>,
     pub nil_prototype: Value,
     pub boolean_prototype: Value,
     pub array_prototype: Value,
@@ -26,23 +71,7 @@ pub struct State {
 
 impl State {
     pub fn new() -> Self {
-        #[inline]
-        fn nof_parallel_worker_threads(num: usize, den: usize, switch_pt: usize) -> usize {
-            let ncpus = num_cpus::get();
-            if ncpus <= switch_pt {
-                ncpus
-            } else {
-                switch_pt + ((ncpus - switch_pt) * num) / den
-            }
-        }
-
-        let gc = GlobalCollector {
-            heap: Mutex::new(vec![]),
-            threshold: AtomicUsize::new(4096 * 10),
-            bytes_allocated: AtomicUsize::new(0),
-            pool: Pool::new(nof_parallel_worker_threads(5, 8, 8)),
-            collecting: AtomicBool::new(false),
-        };
+        let gc = build_gc();
         let nil_prototype = gc.allocate(Object::new(ObjectValue::None));
         let boolean_prototype = gc.allocate(Object::new(ObjectValue::None));
         let array_prototype = gc.allocate(Object::new(ObjectValue::None));
