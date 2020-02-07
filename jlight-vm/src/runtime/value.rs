@@ -321,9 +321,13 @@ impl Value {
 
     pub fn pointer(&self) -> ObjectPointerPointer {
         if self.is_cell() {
-            self.as_cell().pointer()
+            unsafe {
+                ObjectPointerPointer {
+                    raw: &self.u.ptr
+                }
+            }
         } else {
-            ObjectPointer::number(0.0).pointer()
+            unreachable!("WHAT THE FUCK")
         }
     }
     pub fn set_prototype(&self, proto: Value) {

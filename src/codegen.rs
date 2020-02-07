@@ -174,7 +174,7 @@ impl Context {
                 self.write(Instruction::Move(l as _, r));
                 self.locals.insert(name, l as _);
             }
-            Access::Global(g, _, _) => unimplemented!(),
+            Access::Global(_, _, _) => unimplemented!(),
             Access::Field(obj, f) => {
                 let (gid, _) = self.global(&Global::Str(f.to_owned()));
                 let sr = self.new_reg();
@@ -182,7 +182,7 @@ impl Context {
                 self.write(Instruction::LoadGlobal(sr, gid as _));
                 self.write(Instruction::Store(obj, sr, r));
             }
-            Access::Index(i) => unimplemented!(),
+            Access::Index(_) => unimplemented!(),
             Access::Array(value, index) => {
                 let value = self.compile(&value, false);
                 let index = self.compile(&index, false);
@@ -264,7 +264,7 @@ impl Context {
         }
     }
 
-    pub fn load_args(&mut self, names: &[String]) {}
+    pub fn load_args(&mut self, _names: &[String]) {}
 
     pub fn compile_binop(&mut self, op: &str, e1: &Expr, e2: &Expr, tail: bool) -> u32 {
         match op {

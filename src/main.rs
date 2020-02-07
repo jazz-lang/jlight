@@ -9,7 +9,7 @@ fn main() {
     let start_time = std::time::Instant::now();
     let mut ast = vec![];
     let r = Reader::from_string(
-        " 
+        "
 
 var x = 42
 
@@ -22,8 +22,8 @@ return z
     p.parse().unwrap();
     let mut ctx = compile(ast);
     ctx.finalize();
-    let state = jlight_vm::util::shared::Arc::new(jlight_vm::runtime::state::State::new());
-    let module = jlight::codegen::module_from_ctx(&ctx, &state);
+
+    let module = jlight::codegen::module_from_ctx(&ctx, &RUNTIME.state);
     jlight::codegen::disassemble_module(&module);
     let execution_time = std::time::Instant::now();
     RUNTIME.state.threads.attach_current_thread();
@@ -37,5 +37,7 @@ return z
         exec.as_millis(),
         exec.as_nanos()
     );
+    RUNTIME.state.gc.minor_collection(&RUNTIME.state);
     RUNTIME.state.gc.major_collection(&RUNTIME.state);
+    //RUNTIME.state.gc.major_collection(&RUNTIME.state);
 }

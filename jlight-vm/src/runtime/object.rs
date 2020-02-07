@@ -238,7 +238,7 @@ impl ObjectPointer {
                 ObjectValue::Thread(_) => Arc::new(String::from("Thread")),
                 ObjectValue::File(_) => Arc::new(String::from("File")),
                 ObjectValue::ByteArray(ref array) => Arc::new(format!("{:?}", array)),
-                ObjectValue::Function(_) => Arc::new(String::from("Function")),
+                ObjectValue::Function(ref f) => Arc::new(format!("function {}(...) {{...}}",if f.name.len() != 0 {(*f.name).clone()} else {"<anonymous>".to_owned()})),
                 ObjectValue::Number(n) => Arc::new(n.to_string()),
                 ObjectValue::Module(_) => Arc::new(String::from("Module")),
                 ObjectValue::None => {
@@ -380,7 +380,9 @@ impl Object {
         }
         if let Some(map) = self.attributes_map() {
             for (_, pointer) in map.iter() {
-                callback(pointer.pointer());
+                if pointer.is_cell() {
+                    callback(pointer.pointer());
+                }
             }
         }
         match self.value {
@@ -392,7 +394,14 @@ impl Object {
                 });
             }
             ObjectValue::Function(ref function) => {
-                function.upvalues.iter().for_each(|x| callback(x.pointer()));
+                function.upvalues.iter().for_each(|x| if x.is_cell() {callback(x.pointer())});
+            }
+            ObjectValue::Module(ref module) => {
+                for value in module.globals.iter() {
+                    if value.is_cell() {
+                        callback(value.pointer());
+                    }
+                }
             }
             _ => (),
         }

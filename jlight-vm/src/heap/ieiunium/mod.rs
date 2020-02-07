@@ -16,7 +16,7 @@ pub struct IeiuniumCollectorInner {
     pub heap: Vec<ObjectPointer>,
     pub memory_heap: Region,
     pub sweep_alloc: SweepAllocator,
-    pub gray: Mutex<LinkedList<ObjectPointerPointer>>,
+    pub gray: Mutex<LinkedList<ObjectPointer>>,
     pub threshold: usize,
     pub major_threshold: usize,
     pub bytes_allocated: usize,
@@ -44,6 +44,7 @@ impl IeiuniumCollectorInner {
 
     fn minor(&mut self, state: &State) {
         trace!("Ieinium GC: Minor collection triggered");
+        IEIUNIUM_COLLECTING.store(true,Ordering::Release);
         let mut gray = self.gray.lock();
         let mut rootset = vec![];
         super::stop_the_world(state, |thread| {
@@ -51,9 +52,11 @@ impl IeiuniumCollectorInner {
                 rootset.push(x);
             });
         });
+        state.each_pointer(|pointer| {rootset.push(pointer)});
         let mut incremental = IncrementalMarkAndSweep {
             state: IncrementalState::Roots,
             gray: &mut *gray,
+            heap: &mut self.heap,
             heap_region: self.memory_heap,
             freelist: FreeList::new(),
             rootset: &rootset,
@@ -64,22 +67,35 @@ impl IeiuniumCollectorInner {
         incremental.collect(512);
         self.sweep_alloc.free_list = incremental.freelist;
         trace!("Ieinium GC: Minor collection finished!");
+        IEIUNIUM_COLLECTING.store(true,Ordering::Release);
     }
     fn major(&mut self, state: &State) {
         IEIUNIUM_COLLECTING.store(true, Ordering::Release);
         trace!("Ieiunium GC: Triggering major collection");
         let mut rootset = vec![];
+        let mut gray = self.gray.lock();
+        let rgray = LinkedList::new();
+        /*while let Some(v) = gray.pop_back() {
+            if !v.is_tagged_number() {
+                rgray.push_back(v);
+            }
+        }*/
         super::stop_the_world(state, |thread| {
             thread.each_pointer(|optr| {
                 rootset.push(optr);
             });
         });
+        state.each_pointer(|pointer| {rootset.push(pointer)});
+        for (_,module) in crate::runtime::RUNTIME.registry.parsed.iter() {
+            module.as_cell().get().each_pointer(|x| {rootset.push(x)});
+        }
         let fragmentation = self.sweep_alloc.free_list.fragmentation();
         let mut mc = MarkCompact {
             rootset: &rootset,
-            gray: LinkedList::new(),
+            gray: rgray,
             heap: self.memory_heap,
             freelist: FreeList::new(),
+            heap_objects: &mut self.heap,
             init_top: self.sweep_alloc.top,
             top: self.memory_heap.end,
             bytes_allocated: &mut self.bytes_allocated,
@@ -123,8 +139,9 @@ impl IeiuniumCollectorInner {
         let optr = ObjectPointer {
             raw: TaggedPointer::new(ptr.to_mut_ptr::<Object>()),
         };
+        self.heap.push(optr);
         optr.set_color(COLOR_GREY);
-        self.gray.lock().push_back(optr.pointer());
+        self.gray.lock().push_back(optr);
         let value = Value::from(optr);
         value
     }
@@ -143,10 +160,11 @@ pub struct IncrementalMarkAndSweep<'a> {
     rootset: &'a [ObjectPointerPointer],
     heap_region: Region,
     freelist: FreeList,
-    gray: &'a mut LinkedList<ObjectPointerPointer>,
+    gray: &'a mut LinkedList<ObjectPointer>,
     state: IncrementalState,
     bytes_allocated: &'a mut usize,
     used_end: Address,
+    pub heap: &'a mut Vec<ObjectPointer>
 }
 
 impl<'a> IncrementalMarkAndSweep<'a> {
@@ -169,6 +187,14 @@ impl<'a> IncrementalMarkAndSweep<'a> {
         self.freelist.add(start, size);
     }
 
+    fn add_freelist2(freelist: &mut FreeList,start: Address,end: Address) {
+        if start.is_null() {
+            return;
+        }
+        let size = end.offset_from(start);
+        freelist.add(start, size);
+    }
+
     fn step(&mut self, limit: usize) -> usize {
         match &self.state {
             IncrementalState::Roots => {
@@ -177,7 +203,7 @@ impl<'a> IncrementalMarkAndSweep<'a> {
                         continue;
                     }
                     root.get().set_color(COLOR_GREY);
-                    self.gray.push_back(*root);
+                    self.gray.push_back(*root.get());
                 }
 
                 self.state = IncrementalState::Mark;
@@ -193,13 +219,16 @@ impl<'a> IncrementalMarkAndSweep<'a> {
                         if object.raw.is_null() {
                             continue;
                         }
-                        if object.get().is_null() {
+                        if object.is_null() {
                             continue;
                         }
-                        object.get().set_color(COLOR_BLACK);
-                        object.get().get().each_pointer(|pointer| {
+                        if object.get_color() == COLOR_BLACK {
+                            continue;
+                        }
+                        object.set_color(COLOR_BLACK);
+                        object.get().each_pointer(|pointer| {
                             pointer.get().set_color(COLOR_GREY);
-                            self.gray.push_back(pointer);
+                            self.gray.push_back(*pointer.get());
                         });
                         count += 1;
                     }
@@ -213,8 +242,30 @@ impl<'a> IncrementalMarkAndSweep<'a> {
             IncrementalState::Sweep => {
                 let mut count = 0;
                 let mut garbage_start = Address::null();
-
-                let start = self.heap_region.start;
+                self.heap.sort_unstable_by(|x,y| (x.raw.raw as usize).cmp(&(y.raw.raw as usize)));
+                let mut bytes_allocated = *self.bytes_allocated;
+                let mut freelist = FreeList::new();
+                self.heap.retain(|object| {
+                    if object.get_color() != COLOR_WHITE {
+                        Self::add_freelist2(&mut freelist,garbage_start,Address::from_ptr(object.raw.raw));
+                        garbage_start = Address::null();
+                        object.set_color(COLOR_WHITE);
+                        true
+                    } else if garbage_start.is_non_null() {
+                        trace!("Ieinium GC: Minor sweep {:p} ({})",object.raw.raw,object.to_string());
+                        bytes_allocated -= std::mem::size_of::<Object>();
+                        object.finalize();
+                        false
+                    } else {
+                        trace!("Ieinium GC: Minor sweep {:p} ({})",object.raw.raw,object.to_string());
+                        bytes_allocated -= std::mem::size_of::<Object>();
+                        object.finalize();
+                        false
+                    }
+                });
+                self.freelist = freelist;
+                *self.bytes_allocated = bytes_allocated;
+                /*let start = self.heap_region.start;
                 let end = self.heap_region.end;
                 let mut scan = start;
                 const OBJECT_SIZE: usize = std::mem::size_of::<Object>();
@@ -241,7 +292,7 @@ impl<'a> IncrementalMarkAndSweep<'a> {
                         garbage_start = scan;
                     }
                     scan = scan.offset(OBJECT_SIZE);
-                }
+                }*/
                 self.add_freelist(garbage_start, self.heap_region.end);
 
                 self.state = IncrementalState::Done;
@@ -301,7 +352,8 @@ pub struct MarkCompact<'a> {
     init_top: Address,
     top: Address,
     rootset: &'a [ObjectPointerPointer],
-    gray: LinkedList<ObjectPointerPointer>,
+    heap_objects: &'a mut Vec<ObjectPointer>,
+    gray: LinkedList<ObjectPointer>,
     freelist: FreeList,
     bytes_allocated: &'a mut usize,
     used_end: Address,
@@ -323,15 +375,22 @@ impl<'a> MarkCompact<'a> {
     }
     fn mark_live(&mut self) {
         for root in self.rootset.iter() {
+            if root.get().is_tagged_number() {
+                continue;
+            }
             root.get().set_color(COLOR_GREY);
-            self.gray.push_back(*root);
+            self.gray.push_back(*root.get());
         }
 
-        while let Some(object) = self.gray.pop_front() {
-            object.get().set_color(COLOR_BLACK);
-            object.get().get().each_pointer(|field| {
+        while let Some(object) = self.gray.pop_back() {
+            if object.get_color() == COLOR_BLACK {
+                continue;
+            }
+            object.set_color(COLOR_BLACK);
+            trace!("Ieinium GC: Mark {:p} ({})",object.raw.raw,object.to_string());
+            object.get().each_pointer(|field| {
                 field.get().set_color(COLOR_GREY);
-                self.gray.push_back(field);
+                self.gray.push_back(*field.get());
             });
         }
     }
@@ -339,39 +398,30 @@ impl<'a> MarkCompact<'a> {
     fn sweep(&mut self) {
         let mut garbage_start = Address::null();
 
-        let start = self.heap.start;
-        let end = self.heap.end;
-        let mut scan = start;
-        const OBJECT_SIZE: usize = std::mem::size_of::<Object>();
-
-        while scan < self.used_end {
-            let object = ObjectPointer {
-                raw: TaggedPointer {
-                    raw: scan.to_mut_ptr::<Object>(),
-                },
-            };
-            if object.get_color() == COLOR_BLACK {
-                self.add_freelist(garbage_start, scan);
-                garbage_start = Address::null();
-                object.set_color(COLOR_WHITE);
-            } else if garbage_start.is_non_null() {
-                *self.bytes_allocated -= std::mem::size_of::<Object>();
-                trace!(
-                    "Ieinium GC: Major sweeped object 0x{:p}",
-                    scan.to_ptr::<u8>()
-                );
-            // more garbage, do nothing
-            } else {
-                *self.bytes_allocated -= std::mem::size_of::<Object>();
-                // start garbage, last object was live
-                garbage_start = scan;
-                trace!(
-                    "Ieinium GC: Major sweeped object 0x{:p}",
-                    scan.to_ptr::<u8>()
-                );
-            }
-            scan = scan.offset(OBJECT_SIZE);
-        }
+        self.heap_objects.sort_unstable_by(|x,y| (x.raw.raw as usize).cmp(&(y.raw.raw as usize)));
+                let mut bytes_allocated = *self.bytes_allocated;
+                let mut freelist = FreeList::new();
+                self.heap_objects.retain(|object| {
+                    if object.get_color() != COLOR_WHITE {
+                        Self::add_freelist2(&mut freelist,garbage_start,Address::from_ptr(object.raw.raw));
+                        garbage_start = Address::null();
+                        object.set_color(COLOR_WHITE);
+                        trace!("Ieinium GC: Major sweep keep alive object {:p} ({})",object.raw.raw,object.to_string());
+                        true
+                    } else if garbage_start.is_non_null() {
+                        trace!("Ieinium GC: Major sweep {:p} ({})",object.raw.raw,object.to_string());
+                        bytes_allocated -= std::mem::size_of::<Object>();
+                        object.finalize();
+                        false
+                    } else {
+                        trace!("Ieinium GC: Major sweep {:p} ({})",object.raw.raw,object.to_string());
+                        bytes_allocated -= std::mem::size_of::<Object>();
+                        object.finalize();
+                        false
+                    }
+                });
+                self.freelist = freelist;
+                *self.bytes_allocated = bytes_allocated;
         self.add_freelist(garbage_start, self.heap.end);
     }
     fn compute_forward(&mut self) {
@@ -461,6 +511,13 @@ impl<'a> MarkCompact<'a> {
 
         panic!("FAIL: Not enough space for objects.");
     }
+    fn add_freelist2(freelist: &mut FreeList,start: Address,end: Address) {
+        if start.is_null() {
+            return;
+        }
+        let size = end.offset_from(start);
+        freelist.add(start, size);
+    }
 
     fn add_freelist(&mut self, start: Address, end: Address) {
         if start.is_null() {
@@ -504,7 +561,7 @@ impl super::GarbageCollector for IeiuniumCollector {
             return false;
         }
         parent.set_color(COLOR_GREY);
-        self.inner.read().gray.lock().push_back(parent.pointer());
+        self.inner.read().gray.lock().push_back(parent);
         true
     }
 

@@ -135,7 +135,9 @@ impl State {
         cb(self.module_prototype.pointer());
         cb(self.string_prototype.pointer());
         for (_, var) in self.static_variables.iter() {
-            cb(var.pointer());
+            if var.is_number() == false {
+                cb(var.pointer());
+            }
         }
     }
 }

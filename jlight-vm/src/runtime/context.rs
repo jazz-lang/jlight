@@ -7,6 +7,7 @@ use crate::util::shared::Arc;
 
 pub struct CatchEntry {
     pub register: u16,
+    pub context: Ptr<Context>,
     pub jump_to: u16,
 }
 

@@ -302,16 +302,6 @@ impl<'a> Parser<'a> {
         self.parse_binary(0)
     }*/
 
-    fn parse_call(&mut self) -> EResult {
-        let expr = self.parse_expression()?;
-
-        self.expect_token(TokenKind::LParen)?;
-
-        let args = self.parse_comma_list(TokenKind::RParen, |p| p.parse_expression())?;
-
-        Ok(expr!(ExprKind::Call(expr, args), expr.pos))
-    }
-
     pub fn parse_primary(&mut self) -> EResult {
         let mut left = self.parse_factor()?;
         loop {

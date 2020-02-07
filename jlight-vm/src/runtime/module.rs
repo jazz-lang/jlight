@@ -28,7 +28,7 @@ impl Drop for Module {
 
 pub struct ModuleRegistry {
     state: RcState,
-    parsed: FxHashMap<String, Value>,
+    pub parsed: FxHashMap<String, Value>,
 }
 
 impl ModuleRegistry {
