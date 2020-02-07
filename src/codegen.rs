@@ -6,6 +6,7 @@ use jlight_vm::bytecode::*;
 use jlight_vm::runtime::module::*;
 use jlight_vm::runtime::object::*;
 use jlight_vm::runtime::value::*;
+use jlight_vm::runtime::*;
 use jlight_vm::util::shared::Arc;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -800,7 +801,7 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
             hotness: 0,
         };
         let object = Object::with_prototype(ObjectValue::Function(f), state.function_prototype);
-        let object = state.gc.allocate(object);
+        let object = state.gc.allocate(&RUNTIME.state, object);
         //let prototype = Object::with_prototype(ObjectValue::None, state.object_prototype);
         m.globals.get()[*gid as usize] = object;
     }
@@ -809,9 +810,10 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
         match g {
             Global::Str(x) => {
                 let value = ObjectValue::String(Arc::new(x.to_owned()));
-                m.globals.get()[i] = state
-                    .gc
-                    .allocate(Object::with_prototype(value, Value::from(VTag::Null)));
+                m.globals.get()[i] = state.gc.allocate(
+                    &RUNTIME.state,
+                    Object::with_prototype(value, Value::from(VTag::Null)),
+                );
             }
 
             _ => (),
@@ -827,7 +829,9 @@ pub fn module_from_ctx(context: &Context, state: &RcState) -> Arc<Module> {
         hotness: 0,
     };
     let object = Object::with_prototype(ObjectValue::Function(entry), state.function_prototype);
-    m.globals.get().push(state.gc.allocate(object));
+    m.globals
+        .get()
+        .push(state.gc.allocate(&RUNTIME.state, object));
 
     m
 }

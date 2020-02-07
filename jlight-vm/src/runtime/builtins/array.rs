@@ -26,9 +26,9 @@ pub(super) fn register_array(state: &mut RcState) {
     let init = Arc::new("init".to_owned());
     state
         .array_prototype
-        .add_attribute(&init, new_native_fn(state, array_init, -1));
+        .add_attribute(&**state, &init, new_native_fn(state, array_init, -1));
     let length = Arc::new("length".to_owned());
     state
         .array_prototype
-        .add_attribute(&length, new_native_fn(state, array_length, 0));
+        .add_attribute(&**state, &length, new_native_fn(state, array_length, 0));
 }

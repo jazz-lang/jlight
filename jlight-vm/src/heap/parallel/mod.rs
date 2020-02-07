@@ -135,7 +135,7 @@ impl super::GarbageCollector for ParallelCollector {
         self.collect(state);
     }
 
-    fn allocate(&self, object: Object) -> Value {
+    fn allocate(&self, _: &State, object: Object) -> Value {
         self.allocate_(object)
     }
 

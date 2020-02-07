@@ -79,11 +79,11 @@ impl Runtime {
 
     pub fn allocate_string(&self, s: Arc<String>) -> Value {
         let object = Object::with_prototype(ObjectValue::String(s), self.state.string_prototype);
-        self.state.gc.allocate(object)
+        self.state.gc.allocate(&self.state, object)
     }
 
     pub fn allocate_bool(&self, x: bool) -> Value {
         let object = Object::with_prototype(ObjectValue::Bool(x), self.state.boolean_prototype);
-        self.state.gc.allocate(object)
+        self.state.gc.allocate(&self.state, object)
     }
 }

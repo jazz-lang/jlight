@@ -5,6 +5,7 @@ use jlight::parser::*;
 use jlight::reader::*;
 use jlight_vm::runtime::*;
 fn main() {
+    simple_logger::init().unwrap();
     let start_time = std::time::Instant::now();
     let mut ast = vec![];
     let r = Reader::from_string(
@@ -35,5 +36,6 @@ return z
         end.as_nanos(),
         exec.as_millis(),
         exec.as_nanos()
-    )
+    );
+    RUNTIME.state.gc.major_collection(&RUNTIME.state);
 }

@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 
 use crate::runtime::{object::*, state::*, value::*};
 pub trait GarbageCollector {
-    fn allocate(&self, _: Object) -> Value;
+    fn allocate(&self, _: &State, _: Object) -> Value;
     fn minor_collection(&self, _: &State);
     fn major_collection(&self, _: &State);
     fn collecting(&self) -> bool {
@@ -16,6 +16,9 @@ pub trait GarbageCollector {
     }
 
     fn should_collect(&self) -> bool;
+    fn write_barrier(&self, _: ObjectPointer, _: ObjectPointer) -> bool {
+        false
+    }
 }
 
 lazy_static::lazy_static! {

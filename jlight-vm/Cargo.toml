@@ -16,7 +16,7 @@ num_cpus = "1.12"
 mimalloc = "0.1"
 fxhash = "0.2"
 color-backtrace = { version = "0.3", default-features = false }
-regalloc = "0.0.3"
+regalloc = "0.0.4"
 cfg-if = "0.1"
 log = "0.4"
 libc = "0.2.66"

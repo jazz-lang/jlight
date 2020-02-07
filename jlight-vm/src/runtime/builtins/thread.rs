@@ -44,8 +44,8 @@ pub(super) fn register_thread(state: &mut RcState) {
     let join = new_native_fn(state, thread_join, 0);
     state
         .thread_prototype
-        .add_attribute(&Arc::new(String::from("init")), init);
+        .add_attribute(&**state, &Arc::new(String::from("init")), init);
     state
         .thread_prototype
-        .add_attribute(&Arc::new(String::from("join")), join);
+        .add_attribute(&**state, &Arc::new(String::from("join")), join);
 }

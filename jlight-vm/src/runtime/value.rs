@@ -343,8 +343,8 @@ impl Value {
         false
     }
     /// Adds an attribute to the object this pointer points to.
-    pub fn add_attribute(&self, name: &Arc<String>, attr: Value) {
-        self.as_cell().get_mut().add_attribute(name.clone(), attr);
+    pub fn add_attribute(&self, state: &State, name: &Arc<String>, attr: Value) {
+        self.as_cell().add_attribute(state, name, attr);
 
         //process.write_barrier(*self, attr);
     }

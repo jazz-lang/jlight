@@ -1,5 +1,6 @@
 use super::module::Module;
 use super::value::*;
+use crate::heap::mem::Address;
 use crate::runtime::state::{RcState, State};
 use crate::util::shared::Arc;
 use crate::util::tagged_pointer::*;
@@ -28,12 +29,15 @@ pub struct Object {
     pub attributes: TaggedPointer<AHashMap<Arc<String>, Value>>,
     pub value: ObjectValue,
     pub color: AtomicU8,
+    pub fwdptr: Address,
 }
 
 #[derive(Clone, Copy)]
 pub struct ObjectPointer {
     pub raw: TaggedPointer<Object>,
 }
+
+#[derive(Clone, Copy)]
 pub struct ObjectPointerPointer {
     pub raw: *const ObjectPointer,
 }
@@ -117,6 +121,12 @@ impl ObjectPointer {
         }
     }
     pub fn set_prototype(&self, proto: Value) {
+        if proto.is_cell() {
+            super::RUNTIME
+                .state
+                .gc
+                .write_barrier(*self, proto.as_cell());
+        }
         self.get_mut().set_prototype(proto);
     }
     pub fn is_kind_of(&self, state: &RcState, other: Value) -> bool {
@@ -134,10 +144,11 @@ impl ObjectPointer {
     }
 
     /// Adds an attribute to the object this pointer points to.
-    pub fn add_attribute(&self, name: &Arc<String>, attr: Value) {
+    pub fn add_attribute(&self, state: &State, name: &Arc<String>, attr: Value) {
         self.get_mut().add_attribute(name.clone(), attr);
-
-        //process.write_barrier(*self, attr);
+        if attr.is_cell() {
+            state.gc.write_barrier(*self, attr.as_cell());
+        }
     }
 
     /// Looks up an attribute.
@@ -337,11 +348,20 @@ impl Object {
             attributes: TaggedPointer::null(),
             value,
             color: AtomicU8::new(0),
+            fwdptr: Address::null(),
         }
     }
 
     pub fn is_finalizable(&self) -> bool {
         self.value.should_deallocate_native() || self.has_attributes()
+    }
+
+    pub fn set_fwdptr(&mut self, fwdptr: Address) {
+        self.fwdptr = fwdptr;
+    }
+
+    pub fn get_fwdptr(&self) -> Address {
+        self.fwdptr
     }
 
     /// Returns a new object with the given value and prototype.
@@ -351,6 +371,7 @@ impl Object {
             attributes: TaggedPointer::null(),
             value,
             color: AtomicU8::new(0),
+            fwdptr: Address::null(),
         }
     }
     pub fn each_pointer<F: FnMut(ObjectPointerPointer)>(&self, mut callback: F) {
@@ -364,7 +385,11 @@ impl Object {
         }
         match self.value {
             ObjectValue::Array(ref array) => {
-                array.iter().for_each(|x| callback(x.pointer()));
+                array.iter().for_each(|x| {
+                    if x.is_cell() {
+                        callback(x.pointer())
+                    }
+                });
             }
             ObjectValue::Function(ref function) => {
                 function.upvalues.iter().for_each(|x| callback(x.pointer()));
@@ -461,6 +486,12 @@ impl Object {
         }
 
         None
+    }
+
+    pub fn copy_to(&self, object: Address) {
+        unsafe {
+            std::ptr::copy_nonoverlapping(self, object.to_mut_ptr::<Object>(), 1);
+        }
     }
 
     /// Tries to mark this object as pending a forward.
@@ -650,7 +681,7 @@ pub fn new_native_fn(state: &RcState, fun: NativeFn, argc: i32) -> Value {
     };
 
     let object = Object::with_prototype(ObjectValue::Function(function), state.function_prototype);
-    state.gc.allocate(object)
+    state.gc.allocate(&**state, object)
 }
 
 use std::fmt;
