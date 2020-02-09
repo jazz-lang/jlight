@@ -1,0 +1,31 @@
+[package]
+name = "vm"
+version = "0.1.0"
+authors = ["gtash <adel.prokurov@protonmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ahash = "0.3"
+lru = "0.4"
+fxhash = "0.2"
+lazy_static = "1.4"
+cfg-if = "0.1"
+parking_lot = "0.10"
+libc = "0.2.66"
+intrusive-collections = "0.8"
+libmimalloc-sys = { version = "*", default-features = false }
+smallvec = "1.2"
+[target.'cfg(target_family = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["winuser","memoryapi","errhandlingapi","processthreadsapi","synchapi","sysinfoapi"] }
+kernel32-sys = "0.2"
+
+[features]
+use-value64 = []
+default = ["use-value64"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
