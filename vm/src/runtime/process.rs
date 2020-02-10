@@ -42,8 +42,15 @@ impl RescheduleRights {
     }
 }
 
+pub struct CatchTable {
+    pub jump_to: u16,
+    pub context: Ptr<Context>,
+    pub register: u8,
+}
+
 pub struct LocalData {
     pub context: Ptr<Context>,
+    pub catch_tables: Vec<CatchTable>,
 }
 
 pub struct Process {
