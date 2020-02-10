@@ -1,6 +1,7 @@
 use super::value::*;
+use crate::bytecode::*;
 use crate::util::arc::Arc;
-use alloc::vec::Vec;
+use std::vec::Vec;
 pub struct Module {
-    globals: Vec<Value>,
+    pub globals: Vec<Value>,
 }

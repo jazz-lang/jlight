@@ -17,6 +17,9 @@ libc = "0.2.66"
 intrusive-collections = "0.8"
 libmimalloc-sys = { version = "*", default-features = false }
 smallvec = "1.2"
+crossbeam-channel = "0.4"
+crossbeam-deque = "0.7"
+rand = "0.7"
 [target.'cfg(target_family = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["winuser","memoryapi","errhandlingapi","processthreadsapi","synchapi","sysinfoapi"] }
 kernel32-sys = "0.2"

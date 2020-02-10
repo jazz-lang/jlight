@@ -1,11 +1,8 @@
-#![no_std]
 #[macro_use]
 extern crate intrusive_collections;
-extern crate alloc;
-extern crate core as std;
 
-//pub mod runtime;
-
+pub mod bytecode;
 pub mod heap;
+pub mod interpreter;
 pub mod runtime;
 pub mod util;

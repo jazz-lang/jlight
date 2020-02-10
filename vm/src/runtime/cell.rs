@@ -1,10 +1,12 @@
 use super::module::Module;
 use super::value::*;
+use crate::bytecode;
 use crate::heap::space::Space;
 use crate::util::arc::Arc;
 use crate::util::tagged::*;
-use alloc::string::String;
-use alloc::vec::Vec;
+use bytecode::basicblock::BasicBlock;
+use std::string::String;
+use std::vec::Vec;
 pub const MIN_OLD_SPACE_GENERATION: u8 = 5;
 
 pub enum NativeResult {
@@ -20,6 +22,7 @@ pub struct Function {
     pub argc: i32,
     pub native: Option<NativeFn>,
     pub module: Arc<Module>,
+    pub code: Arc<Vec<BasicBlock>>,
 }
 
 pub enum CellValue {
@@ -44,7 +47,7 @@ pub struct Cell {
     pub forward: crate::util::mem::Address,
 }
 
-pub type AttributesMap = lru::LruCache<Arc<String>, Value>;
+pub type AttributesMap = ahash::AHashMap<Arc<String>, Value>;
 
 impl Cell {
     pub fn trace<F>(&self, mut cb: F)

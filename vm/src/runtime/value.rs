@@ -5,16 +5,16 @@ pub type EncodedValue = i64;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
-union EncodedValueDescriptor {
-    as_int64: i64,
+pub union EncodedValueDescriptor {
+    pub as_int64: i64,
     #[cfg(feature = "use-value64")]
-    ptr: CellPointer,
-    as_bits: AsBits,
+    pub ptr: CellPointer,
+    pub as_bits: AsBits,
 }
 
 /// TODO: Big endian support
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-struct AsBits {
+pub struct AsBits {
     pub payload: i32,
     pub tag: i32,
 }
@@ -45,7 +45,7 @@ pub enum VTag {
 
 #[derive(Copy, Clone)]
 pub struct Value {
-    u: EncodedValueDescriptor,
+    pub u: EncodedValueDescriptor,
 }
 
 pub const NOT_INT52: usize = 1 << 52;
