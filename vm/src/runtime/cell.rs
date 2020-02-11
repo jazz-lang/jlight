@@ -1,4 +1,5 @@
 use super::module::Module;
+use super::state::*;
 use super::value::*;
 use crate::bytecode;
 use crate::heap::space::Space;
@@ -8,6 +9,16 @@ use bytecode::basicblock::BasicBlock;
 use std::string::String;
 use std::vec::Vec;
 pub const MIN_OLD_SPACE_GENERATION: u8 = 5;
+
+macro_rules! push_collection {
+    ($map:expr, $what:ident, $vec:expr) => {{
+        $vec.reserve($map.len());
+
+        for thing in $map.$what() {
+            $vec.push(thing.clone());
+        }
+    }};
+}
 
 pub enum NativeResult {
     Error(Value),
@@ -42,8 +53,6 @@ pub struct Cell {
     pub prototype: Option<CellPointer>,
     pub attributes: TaggedPointer<AttributesMap>,
     pub generation: u8,
-    pub soft: bool,
-    pub mark: bool,
     pub forward: crate::util::mem::Address,
 }
 
@@ -56,8 +65,6 @@ impl Cell {
             prototype: Some(prototype),
             attributes: TaggedPointer::null(),
             generation: 0,
-            soft: false,
-            mark: false,
             forward: crate::util::mem::Address::null(),
         }
     }
@@ -68,8 +75,6 @@ impl Cell {
             prototype: None,
             attributes: TaggedPointer::null(),
             generation: 0,
-            soft: false,
-            mark: false,
             forward: crate::util::mem::Address::null(),
         }
     }
@@ -80,6 +85,35 @@ impl Cell {
 
     pub fn attributes_map_mut(&self) -> Option<&mut AttributesMap> {
         self.attributes.as_mut()
+    }
+
+    /// Allocates an attribute map if needed.
+    fn allocate_attributes_map(&mut self) {
+        if !self.has_attributes() {
+            self.set_attributes_map(AttributesMap::default());
+        }
+    }
+
+    /// Returns true if an attributes map has been allocated.
+    pub fn has_attributes(&self) -> bool {
+        !self.attributes.untagged().is_null()
+    }
+
+    pub fn drop_attributes(&mut self) {
+        if !self.has_attributes() {
+            return;
+        }
+
+        drop(unsafe { Box::from_raw(self.attributes.untagged()) });
+
+        self.attributes = TaggedPointer::null();
+    }
+
+    /// Adds a new attribute to the current object.
+    pub fn add_attribute(&mut self, name: Arc<String>, object: Value) {
+        self.allocate_attributes_map();
+        assert!(name.references() != 0);
+        self.attributes_map_mut().unwrap().insert(name, object);
     }
 
     pub fn set_attributes_map(&mut self, attrs: AttributesMap) {
@@ -99,6 +133,92 @@ impl Cell {
                 }
             }
         }
+    }
+
+    /// Sets the prototype of this object.
+    pub fn set_prototype(&mut self, prototype: CellPointer) {
+        self.prototype = Some(prototype);
+    }
+
+    /// Returns the prototype of this object.
+    pub fn prototype(&self) -> Option<CellPointer> {
+        self.prototype
+    }
+
+    /// Returns and removes the prototype of this object.
+    pub fn take_prototype(&mut self) -> Option<CellPointer> {
+        self.prototype.take()
+    }
+
+    /// Removes an attribute and returns it.
+    pub fn remove_attribute(&mut self, name: &Arc<String>) -> Option<Value> {
+        if let Some(map) = self.attributes_map_mut() {
+            map.remove(name)
+        } else {
+            None
+        }
+    }
+
+    /// Returns all the attributes available to this object.
+    pub fn attributes(&self) -> Vec<Value> {
+        let mut attributes = Vec::new();
+
+        if let Some(map) = self.attributes_map() {
+            push_collection!(map, values, attributes);
+        }
+
+        attributes
+    }
+
+    /// Returns all the attribute names available to this object.
+    pub fn attribute_names(&self) -> Vec<&Arc<String>> {
+        let mut attributes = Vec::new();
+
+        if let Some(map) = self.attributes_map() {
+            for (key, _) in map.iter() {
+                attributes.push(key);
+            }
+            //push_collection!(map, keys, attributes);
+        }
+
+        attributes
+    }
+    /// Looks up an attribute without walking the prototype chain.
+    pub fn lookup_attribute_in_self(&self, name: &Arc<String>) -> Option<Value> {
+        if let Some(map) = self.attributes_map() {
+            map.get(name).map(|x| *x)
+        } else {
+            None
+        }
+    }
+    /// Looks up an attribute in either the current object or a parent object.
+    pub fn lookup_attribute(&self, name: &Arc<String>) -> Option<Value> {
+        let got = self.lookup_attribute_in_self(&name);
+
+        if got.is_some() {
+            return got;
+        }
+
+        // Method defined somewhere in the object hierarchy
+        if self.prototype().is_some() {
+            let mut opt_parent = self.prototype();
+
+            while let Some(parent_ptr) = opt_parent {
+                if parent_ptr.is_tagged_number() || parent_ptr.raw.is_null() {
+                    break;
+                }
+                let parent = parent_ptr;
+                let got = parent.get().lookup_attribute_in_self(name);
+
+                if got.is_some() {
+                    return got;
+                }
+
+                opt_parent = parent.get().prototype();
+            }
+        }
+
+        None
     }
 }
 pub struct CellPointer {
@@ -139,19 +259,27 @@ impl CellPointer {
     }
 
     pub fn is_marked(&self) -> bool {
-        self.raw.bit_is_set(1)
+        self.get().attributes.bit_is_set(0)
     }
 
-    pub fn mark(&mut self, _: bool) {
-        self.raw.set_bit(1)
+    pub fn mark(&self, value: bool) {
+        if value {
+            self.get_mut().attributes.set_bit(0);
+        } else {
+            self.get_mut().attributes.unset_bit(0);
+        }
     }
 
     pub fn is_soft_marked(&self) -> bool {
-        self.get().soft
+        self.get().attributes.bit_is_set(1)
     }
 
     pub fn soft_mark(&self, value: bool) {
-        self.get_mut().soft = value;
+        if value {
+            self.get_mut().attributes.set_bit(1);
+        } else {
+            self.get_mut().attributes.unset_bit(1);
+        }
     }
 
     pub fn get(&self) -> &Cell {
@@ -169,11 +297,92 @@ impl CellPointer {
     pub fn set_permanent(&mut self) {
         self.raw.set_bit(0)
     }
+
+    pub fn prototype(&self, state: &State) -> Option<CellPointer> {
+        if self.is_tagged_number() {
+            Some(state.number_prototype.as_cell())
+        } else {
+            self.get().prototype()
+        }
+    }
+    pub fn set_prototype(&self, proto: CellPointer) {
+        self.get_mut().set_prototype(proto);
+    }
+
+    pub fn is_kind_of(&self, state: &RcState, other: CellPointer) -> bool {
+        let mut prototype = self.prototype(state);
+
+        while let Some(proto) = prototype {
+            if proto == other {
+                return true;
+            }
+
+            prototype = proto.prototype(state);
+        }
+
+        false
+    }
+
+    /// Adds an attribute to the object this pointer points to.
+    pub fn add_attribute(&self, state: &State, name: &Arc<String>, attr: Value) {
+        self.get_mut().add_attribute(name.clone(), attr);
+    }
+
+    /// Looks up an attribute.
+    pub fn lookup_attribute(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
+        if self.is_tagged_number() {
+            state
+                .number_prototype
+                .as_cell()
+                .get()
+                .lookup_attribute(name)
+        } else {
+            self.get().lookup_attribute(name)
+        }
+    }
+
+    /// Looks up an attribute without walking the prototype chain.
+    pub fn lookup_attribute_in_self(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
+        if self.is_tagged_number() {
+            state
+                .number_prototype
+                .as_cell()
+                .get()
+                .lookup_attribute_in_self(name)
+        } else {
+            self.get().lookup_attribute_in_self(name)
+        }
+    }
+
+    pub fn attributes(&self) -> Vec<Value> {
+        if self.is_tagged_number() {
+            vec![]
+        } else {
+            self.get().attributes()
+        }
+    }
+    pub fn is_tagged_number(&self) -> bool {
+        self.raw.bit_is_set(0)
+    }
+
+    pub fn attribute_names(&self) -> Vec<&Arc<String>> {
+        if self.is_tagged_number() {
+            vec![]
+        } else {
+            self.get().attribute_names()
+        }
+    }
 }
 
 impl Copy for CellPointer {}
 impl Clone for CellPointer {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl PartialEq for CellPointer {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw.untagged() == other.raw.untagged()
     }
 }

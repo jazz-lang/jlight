@@ -22,7 +22,9 @@ impl PermanentHeap {
             space: space::Space::new(perm_size),
         }
     }
-
+    pub fn allocate_empty(&mut self) -> Value {
+        self.allocate(Cell::new(CellValue::None))
+    }
     pub fn allocate(&mut self, cell: Cell) -> Value {
         let pointer = self
             .space

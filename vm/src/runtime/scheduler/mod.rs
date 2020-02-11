@@ -6,4 +6,5 @@ pub mod process_worker;
 pub mod queue;
 pub mod state;
 pub mod timeout;
+pub mod timeout_worker;
 pub mod worker;

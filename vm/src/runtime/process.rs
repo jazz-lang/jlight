@@ -1,3 +1,4 @@
+use super::cell::*;
 use super::channel::Channel;
 use super::scheduler::timeout::*;
 use super::value::*;
@@ -60,6 +61,7 @@ pub struct LocalData {
     pub gc: GC,
     pub heap: Heap,
     pub thread_id: Option<u8>,
+    pub dead_contexts: Vec<Ptr<Context>>,
 }
 
 pub struct Process {
@@ -132,7 +134,7 @@ impl Process {
         self.local_data().context.get()
     }
 
-    pub fn trace<F>(&self, cb: F)
+    pub fn trace<F>(&self, mut cb: F)
     where
         F: FnMut(*const super::cell::CellPointer),
     {
@@ -194,7 +196,7 @@ impl Process {
             return;
         }
 
-        //channel.send(local_data.allocator.copy_object(message_to_copy));
+        channel.send(local_data.heap.copy_object(message_to_copy));
     }
 
     pub fn send_message_from_self(&self, message: Value) {
@@ -235,6 +237,21 @@ impl Process {
 
     pub fn is_blocking(&self) -> bool {
         self.local_data().status.is_blocking()
+    }
+
+    pub fn do_gc(&mut self) {
+        let channel = self.local_data().channel.lock();
+        channel.trace(|pointer| {
+            self.local_data_mut().gc.schedule(pointer as *mut _);
+        });
+        self.trace(|pointer| {
+            self.local_data_mut()
+                .gc
+                .schedule(pointer as *mut CellPointer);
+        });
+
+        let local_data = self.local_data_mut();
+        local_data.gc.collect_garbage(&mut local_data.heap);
     }
 }
 

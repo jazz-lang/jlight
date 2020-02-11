@@ -21,6 +21,10 @@ pub fn with_bit<T>(pointer: *mut T, bit: usize) -> *mut T {
     (pointer as usize | 1 << bit) as _
 }
 
+pub fn without_bit<T>(pointer: *mut T, bit: usize) -> *mut T {
+    (pointer as usize ^ 1 << bit) as _
+}
+
 /// Returns the given pointer without any tags set.
 pub fn untagged<T>(pointer: *mut T) -> *mut T {
     (pointer as usize & UNTAG_MASK) as _
@@ -45,6 +49,12 @@ impl<T> TaggedPointer<T> {
         pointer.set_bit(bit);
 
         pointer
+    }
+
+    pub fn unset_bit(&mut self, bit: usize) {
+        if self.bit_is_set(bit) {
+            self.raw = without_bit(self.raw, bit);
+        }
     }
 
     /// Returns a null pointer.
