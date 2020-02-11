@@ -44,6 +44,21 @@ pub struct ProcessWorker {
 }
 
 impl ProcessWorker {
+    /// Starts a new worker operating in the normal mode.
+    pub fn new(
+        id: usize,
+        queue: Arc<Queue<Arc<Process>>>,
+        state: Arc<PoolState<Arc<Process>>>,
+    ) -> Self {
+        ProcessWorker {
+            id,
+            random_number: rand::random(),
+            rng: thread_rng(),
+            queue,
+            state,
+            mode: Mode::Normal,
+        }
+    }
     /// Performs a single iteration of the normal work loop.
     fn normal_iteration(&mut self) {
         if self.process_local_jobs() {

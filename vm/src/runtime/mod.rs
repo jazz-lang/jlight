@@ -1,4 +1,5 @@
 pub mod cell;
+pub mod channel;
 pub mod module;
 pub mod process;
 pub mod scheduler;

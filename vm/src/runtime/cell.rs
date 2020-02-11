@@ -50,6 +50,41 @@ pub struct Cell {
 pub type AttributesMap = ahash::AHashMap<Arc<String>, Value>;
 
 impl Cell {
+    pub fn with_prototype(value: CellValue, prototype: CellPointer) -> Self {
+        Self {
+            value,
+            prototype: Some(prototype),
+            attributes: TaggedPointer::null(),
+            generation: 0,
+            soft: false,
+            mark: false,
+            forward: crate::util::mem::Address::null(),
+        }
+    }
+
+    pub fn new(value: CellValue) -> Self {
+        Self {
+            value,
+            prototype: None,
+            attributes: TaggedPointer::null(),
+            generation: 0,
+            soft: false,
+            mark: false,
+            forward: crate::util::mem::Address::null(),
+        }
+    }
+    /// Returns an immutable reference to the attributes.
+    pub fn attributes_map(&self) -> Option<&AttributesMap> {
+        self.attributes.as_ref()
+    }
+
+    pub fn attributes_map_mut(&self) -> Option<&mut AttributesMap> {
+        self.attributes.as_mut()
+    }
+
+    pub fn set_attributes_map(&mut self, attrs: AttributesMap) {
+        self.attributes = TaggedPointer::new(Box::into_raw(Box::new(attrs)));
+    }
     pub fn trace<F>(&self, mut cb: F)
     where
         F: FnMut(*const CellPointer),
@@ -104,11 +139,11 @@ impl CellPointer {
     }
 
     pub fn is_marked(&self) -> bool {
-        self.get().mark
+        self.raw.bit_is_set(1)
     }
 
-    pub fn mark(&self, value: bool) {
-        self.get_mut().mark = value;
+    pub fn mark(&mut self, _: bool) {
+        self.raw.set_bit(1)
     }
 
     pub fn is_soft_marked(&self) -> bool {
@@ -125,6 +160,14 @@ impl CellPointer {
 
     pub fn get_mut(&self) -> &mut Cell {
         self.raw.as_mut().unwrap()
+    }
+
+    pub fn is_permanent(&self) -> bool {
+        self.raw.bit_is_set(0)
+    }
+
+    pub fn set_permanent(&mut self) {
+        self.raw.set_bit(0)
     }
 }
 

@@ -52,7 +52,7 @@ impl GC {
         std::mem::swap(&mut self.tmp_space, &mut tmp_space);
         self.process_grey(heap);
 
-        while let Some(item) = self.black_items.pop_back() {
+        while let Some(mut item) = self.black_items.pop_back() {
             item.value.mark(false);
             item.value.soft_mark(false);
         }
