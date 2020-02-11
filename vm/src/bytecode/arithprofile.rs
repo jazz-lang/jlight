@@ -1,5 +1,5 @@
+use crate::runtime::value::Value;
 use crate::types::*;
-
 #[derive(Clone, Copy)]
 pub struct ObservedType {
     pub bits: u8,
@@ -71,6 +71,42 @@ impl ObservedResults {
     pub const fn new(x: u8) -> Self {
         Self { bits: x }
     }
+
+    pub const fn did_observe_non_int32(&self) -> bool {
+        (self.bits
+            & (Self::NON_NEG_ZERO_DOUBLE
+                | Self::NEG_ZERO_DOUBLE
+                | Self::NON_NUMERIC
+                | Self::BIGINT))
+            != 0
+    }
+
+    pub const fn did_observe_double(&self) -> bool {
+        (self.bits & (Self::NON_NEG_ZERO_DOUBLE | Self::NEG_ZERO_DOUBLE)) != 0
+    }
+
+    pub const fn did_observe_non_neg_zero_double(&self) -> bool {
+        (self.bits & (Self::NON_NEG_ZERO_DOUBLE)) != 0
+    }
+
+    pub const fn did_observe_neg_zero_double(&self) -> bool {
+        (self.bits & (Self::NEG_ZERO_DOUBLE)) != 0
+    }
+
+    pub const fn did_observe_non_numeric(&self) -> bool {
+        (self.bits & Self::NON_NUMERIC) != 0
+    }
+    pub const fn did_observe_bigint(&self) -> bool {
+        (self.bits & Self::BIGINT) != 0
+    }
+
+    pub const fn did_observe_int32_overflow(&self) -> bool {
+        (self.bits & Self::INT32_OVERFLOW) != 0
+    }
+
+    pub const fn did_observe_int52_overflow(&self) -> bool {
+        (self.bits & Self::INT52_OVERFLOW) != 0
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -84,8 +120,75 @@ pub struct ArithProfile {
     pub bits: u16,
 }
 
+const RHS_OBSERVED_TYPE_SHIFT: u16 = ObservedResults::NUM_BITS_NEEDED;
+const LHS_OBSERVED_TYPE_SHIFT: u16 = RHS_OBSERVED_TYPE_SHIFT + ObservedResults::NUM_BITS_NEEDED;
+
 impl ArithProfile {
-    pub const fn observed_results(&self) -> u16 {
-        return self.bits & ((1 << ObservedResults::NUM_BITS_NEEDED) - 1);
+    #[inline]
+    pub const fn observed_results(&self) -> ObservedResults {
+        return ObservedResults::new(
+            (self.bits & ((1 << ObservedResults::NUM_BITS_NEEDED) - 1)) as u8,
+        );
+    }
+    #[inline]
+    pub const fn has_bits(&self, mask: u16) -> bool {
+        self.bits & mask != 0
+    }
+    #[inline]
+    pub fn set_bit(&mut self, mask: u16) {
+        self.bits |= mask;
+    }
+
+    #[inline]
+    pub const fn did_observe_non_int32(&self) -> bool {
+        self.observed_results().did_observe_non_int32()
+    }
+
+    #[inline]
+    pub const fn did_observe_double(&self) -> bool {
+        self.observed_results().did_observe_double()
+    }
+
+    #[inline]
+    pub const fn did_observe_non_neg_zero_double(&self) -> bool {
+        self.observed_results().did_observe_non_neg_zero_double()
+    }
+
+    #[inline]
+    pub const fn did_observe_neg_zero_double(&self) -> bool {
+        self.observed_results().did_observe_neg_zero_double()
+    }
+
+    #[inline]
+    pub const fn did_observe_non_numeric(&self) -> bool {
+        self.observed_results().did_observe_non_numeric()
+    }
+
+    #[inline]
+    pub const fn did_observe_bigint(&self) -> bool {
+        self.observed_results().did_observe_bigint()
+    }
+    #[inline]
+    pub const fn did_observe_int32_overflow(&self) -> bool {
+        self.observed_results().did_observe_int32_overflow()
+    }
+
+    #[inline]
+    pub const fn did_observe_int52_overflow(&self) -> bool {
+        self.observed_results().did_observe_int52_overflow()
+    }
+
+    pub fn observe_result(&mut self, value: &Value) {
+        if value.is_int32() {
+            return;
+        }
+        if value.is_number() {
+            self.bits |= ObservedResults::INT32_OVERFLOW as u16
+                | ObservedResults::INT52_OVERFLOW as u16
+                | ObservedResults::NON_NEG_ZERO_DOUBLE as u16
+                | ObservedResults::NEG_ZERO_DOUBLE as u16;
+            return;
+        }
+        self.bits |= ObservedResults::NON_NUMERIC as u16;
     }
 }
