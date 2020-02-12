@@ -297,7 +297,7 @@ impl Process {
         self.local_data().status.is_blocking()
     }
 
-    pub fn do_gc(&mut self) {
+    pub fn do_gc(&self) {
         let channel = self.local_data().channel.lock();
         channel.trace(|pointer| {
             self.local_data_mut().gc.schedule(pointer as *mut _);

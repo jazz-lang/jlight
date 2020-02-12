@@ -1,4 +1,5 @@
 pub mod gc;
+pub mod gc_pool;
 pub mod space;
 use crate::runtime::cell::*;
 use crate::runtime::value::*;

@@ -9,7 +9,7 @@ pub extern "C" fn spawn(
     process: &Arc<Process>,
     _this: Value,
     arguments: &[Value],
-) -> Result<Value, Value> {
+) -> Result<Return, Value> {
     let new_proc = Process::from_function(arguments[0], &state.config)
         .map_err(|err| process.allocate_string(state, &err))?;
     state.scheduler.schedule(new_proc.clone());
@@ -17,7 +17,7 @@ pub extern "C" fn spawn(
         CellValue::Process(new_proc),
         state.process_prototype.as_cell(),
     ));
-    Ok(new_proc_ptr)
+    Ok(Return::Value(new_proc_ptr))
 }
 
 pub extern "C" fn send(
@@ -25,7 +25,7 @@ pub extern "C" fn send(
     process: &Arc<Process>,
     this: Value,
     arguments: &[Value],
-) -> Result<Value, Value> {
+) -> Result<Return, Value> {
     let process = if this == state.process_prototype {
         process.clone()
     } else {
@@ -46,7 +46,7 @@ pub extern "C" fn send(
         receiver.send_message_from_external_process(arguments[1]);
         attempt_to_reschedule_process(state, &receiver);
     }
-    Ok(Value::from(VTag::Undefined))
+    Ok(Return::Value(Value::from(VTag::Undefined)))
 }
 
 pub extern "C" fn receive(
@@ -54,7 +54,7 @@ pub extern "C" fn receive(
     process: &Arc<Process>,
     this: Value,
     _arguments: &[Value],
-) -> Result<Value, Value> {
+) -> Result<Return, Value> {
     let process = if this == state.process_prototype {
         process.clone()
     } else {
@@ -64,12 +64,12 @@ pub extern "C" fn receive(
     let proc = process;
     if let Some(msg) = proc.receive_message() {
         proc.no_longer_waiting_for_message();
-        return Ok(msg);
+        return Ok(Return::Value(msg));
     } else if proc.is_waiting_for_message() {
         proc.no_longer_waiting_for_message();
-        Ok(Value::from(VTag::Null))
+        Ok(Return::Value(Value::from(VTag::Null)))
     } else {
-        Ok(Value::from(VTag::Null))
+        Ok(Return::Value(Value::from(VTag::Null)))
     }
 }
 
@@ -78,7 +78,7 @@ pub extern "C" fn wait_for_message(
     process: &Arc<Process>,
     this: Value,
     arguments: &[Value],
-) -> Result<Value, Value> {
+) -> Result<Return, Value> {
     let process = if this == state.process_prototype {
         process.clone()
     } else {
@@ -114,7 +114,7 @@ pub extern "C" fn wait_for_message(
     if process.has_messages() {
         attempt_to_reschedule_process(state, &process);
     }
-    Ok(Value::from(VTag::Null))
+    Ok(Return::YieldProcess)
 }
 
 pub extern "C" fn has_messages(
@@ -122,18 +122,18 @@ pub extern "C" fn has_messages(
     process: &Arc<Process>,
     this: Value,
     _: &[Value],
-) -> Result<Value, Value> {
+) -> Result<Return, Value> {
     let process = if this == state.process_prototype {
         process.clone()
     } else {
         this.process_value()
             .map_err(|err| process.allocate_string(state, &err))?
     };
-    Ok(Value::from(if process.has_messages() {
+    Ok(Return::Value(Value::from(if process.has_messages() {
         VTag::True
     } else {
         VTag::False
-    }))
+    })))
 }
 
 pub extern "C" fn current(
@@ -141,10 +141,12 @@ pub extern "C" fn current(
     process: &Arc<Process>,
     _: Value,
     _: &[Value],
-) -> Result<Value, Value> {
-    Ok(Value::from(process.allocate(Cell::with_prototype(
-        CellValue::Process(process.clone()),
-        state.process_prototype.as_cell(),
+) -> Result<Return, Value> {
+    Ok(Return::Value(Value::from(process.allocate(
+        Cell::with_prototype(
+            CellValue::Process(process.clone()),
+            state.process_prototype.as_cell(),
+        ),
     ))))
 }
 
@@ -153,9 +155,21 @@ pub fn initialize_process_prototype(state: &RcState) {
     let name = Arc::new("spawn".to_owned());
     let spawn = state.allocate_native_fn_with_name(spawn, name.clone(), 1);
     proc_prototype.add_attribute(state, &name, Value::from(spawn));
+    let name = Arc::new("send".to_owned());
+    let send = state.allocate_native_fn_with_name(send, name.clone(), -1);
+    proc_prototype.add_attribute(state, &name, Value::from(send));
     let name = Arc::new("receive_message".to_owned());
     let recv = state.allocate_native_fn_with_name(receive, name.clone(), 0);
-    proc_prototype.add_attribute(state, &name, Value::from(spawn));
+    proc_prototype.add_attribute(state, &name, Value::from(recv));
+    let name = Arc::new("wait_for_message".to_owned());
+    let wait = state.allocate_native_fn_with_name(wait_for_message, name.clone(), -1);
+    proc_prototype.add_attribute(state, &name, Value::from(wait));
+    let name = Arc::new("current".to_owned());
+    let current = state.allocate_native_fn_with_name(current, name.clone(), 0);
+    proc_prototype.add_attribute(state, &name, Value::from(current));
+    let name = Arc::new("has_messages".to_owned());
+    let has_messages = state.allocate_native_fn_with_name(has_messages, name.clone(), 0);
+    proc_prototype.add_attribute(state, &name, Value::from(has_messages));
 }
 
 /// Attempts to reschedule the given process after it was sent a message.

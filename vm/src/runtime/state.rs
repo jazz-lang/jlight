@@ -1,12 +1,14 @@
 use super::cell::*;
 use super::scheduler;
 use super::value::*;
+use crate::heap::gc_pool::GcPool;
 use crate::heap::PermanentHeap;
 use crate::util::arc::Arc;
 use parking_lot::Mutex;
 use scheduler::process_scheduler::ProcessScheduler;
 use scheduler::timeout_worker::TimeoutWorker;
 pub struct State {
+    pub gc_pool: GcPool,
     pub scheduler: ProcessScheduler,
     pub timeout_worker: TimeoutWorker,
     pub perm_heap: Mutex<PermanentHeap>,
@@ -38,7 +40,7 @@ fn nof_parallel_worker_threads(num: usize, den: usize, switch_pt: usize) -> usiz
 
 impl State {
     pub fn new(config: super::config::Config) -> Arc<Self> {
-        let mut perm = PermanentHeap::new(2 & 1024 * 1024);
+        let mut perm = PermanentHeap::new(2 * 1024 * 1024);
         let object_prototype = perm.allocate_empty();
         let string_prototype = perm.allocate_empty();
         let array_prototype = perm.allocate_empty();
@@ -48,6 +50,14 @@ impl State {
         let process_prototype = perm.allocate_empty();
         let module_prototype = perm.allocate_empty();
         let boolean_prototype = perm.allocate_empty();
+        string_prototype.set_prototype(object_prototype);
+        array_prototype.set_prototype(object_prototype);
+        number_prototype.set_prototype(object_prototype);
+        function_prototype.set_prototype(object_prototype);
+        generator_prototype.set_prototype(object_prototype);
+        process_prototype.set_prototype(object_prototype);
+        module_prototype.set_prototype(object_prototype);
+        boolean_prototype.set_prototype(object_prototype);
         /*
         Arc::new(Self {
             scheduler: ProcessScheduler::new(
@@ -72,7 +82,10 @@ impl State {
             code: Arc::new(vec![]),
             native: Some(native_fn),
             argc,
-            module: Arc::new(super::module::Module { globals: vec![] }),
+            module: Arc::new(super::module::Module {
+                globals: vec![],
+                name: Arc::new("<native>".to_owned()),
+            }),
         };
 
         let cell = self
@@ -97,7 +110,10 @@ impl State {
             code: Arc::new(vec![]),
             native: Some(native_fn),
             argc,
-            module: Arc::new(super::module::Module { globals: vec![] }),
+            module: Arc::new(super::module::Module {
+                globals: vec![],
+                name: Arc::new("<native>".to_owned()),
+            }),
         };
 
         let cell = self

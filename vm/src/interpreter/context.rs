@@ -20,6 +20,29 @@ pub struct Context {
 }
 
 impl Context {
+    pub fn contexts(&self) -> ExecutionContextIterator<'_> {
+        ExecutionContextIterator {
+            current: Some(self),
+        }
+    }
+    pub fn new() -> Self {
+        Self {
+            registers: [Value::from(VTag::Undefined); 48],
+            stack: Vec::with_capacity(32),
+            module: Arc::new(Module {
+                globals: vec![],
+                name: Arc::new("<>".to_owned()),
+            }),
+            parent: None,
+            index: 0,
+            bindex: 0,
+            code: Arc::new(vec![]),
+            function: CellPointer {
+                raw: crate::util::tagged::TaggedPointer::null(),
+            },
+        }
+    }
+
     pub fn set_register(&mut self, r: u8, value: Value) {
         self.registers[r as usize] = value;
     }
@@ -59,5 +82,28 @@ impl Context {
             cb(&context.function);
             current = context.parent.as_ref().map(|c| &**c);
         }
+    }
+}
+
+/// Struct for iterating over an ExecutionContext and its parent contexts.
+pub struct ExecutionContextIterator<'a> {
+    current: Option<&'a Context>,
+}
+
+impl<'a> Iterator for ExecutionContextIterator<'a> {
+    type Item = &'a Context;
+
+    fn next(&mut self) -> Option<&'a Context> {
+        if let Some(ctx) = self.current {
+            if let Some(parent) = ctx.parent.as_ref() {
+                self.current = Some(&*parent);
+            } else {
+                self.current = None;
+            }
+
+            return Some(ctx);
+        }
+
+        None
     }
 }

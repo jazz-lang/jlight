@@ -8,14 +8,20 @@ pub mod scheduler;
 pub mod state;
 pub mod value;
 
+use state::*;
+
 lazy_static::lazy_static!(
     static ref RUNTIME: Runtime = Runtime::new();
 );
 
-pub struct Runtime {}
+pub struct Runtime {
+    pub state: RcState,
+}
 
 impl Runtime {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            state: State::new(config::Config::default()),
+        }
     }
 }

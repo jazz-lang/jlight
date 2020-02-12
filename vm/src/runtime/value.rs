@@ -181,6 +181,12 @@ impl Value {
         unsafe { self.u.as_int64 as i32 }
     }
 
+    pub fn set_prototype(&self, value: Value) {
+        if value.is_cell() && self.is_cell() {
+            self.as_cell().get_mut().prototype = Some(value.as_cell());
+        }
+    }
+
     pub fn add_attribute(&self, state: &RcState, name: Arc<String>, value: Value) {
         if self.is_number() {
             state.number_prototype.add_attribute(state, name, value);

@@ -25,7 +25,14 @@ macro_rules! push_collection {
     }};
 }
 
-pub type NativeFn = extern "C" fn(&RcState, &Arc<Process>, Value, &[Value]) -> Result<Value, Value>;
+pub enum Return {
+    Value(Value),
+    YieldProcess,
+    SuspendProcess,
+}
+
+pub type NativeFn =
+    extern "C" fn(&RcState, &Arc<Process>, Value, &[Value]) -> Result<Return, Value>;
 pub struct Function {
     pub name: Arc<String>,
     pub upvalues: Vec<Value>,
@@ -233,6 +240,12 @@ pub struct CellPointer {
 }
 
 impl CellPointer {
+    pub fn function_value(&self) -> Result<&Function, String> {
+        match &self.get().value {
+            CellValue::Function(func) => Ok(func),
+            _ => Err("Not a function".to_owned()),
+        }
+    }
     pub fn copy_to(
         &self,
         old_space: &mut Space,
