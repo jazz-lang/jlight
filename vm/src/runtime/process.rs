@@ -180,7 +180,7 @@ impl Process {
         self.local_data().context.get()
     }
 
-    pub fn trace<F>(&self, mut cb: F)
+    pub fn trace<F>(&self, cb: F)
     where
         F: FnMut(*const super::cell::CellPointer),
     {

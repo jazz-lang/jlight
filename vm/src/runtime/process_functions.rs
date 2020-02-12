@@ -30,7 +30,7 @@ pub extern "C" fn send(
         process.clone()
     } else {
         this.process_value()
-            .map_err(|err| process.allocate_string(state, &err))?
+            .map_err(|err: String| process.allocate_string(state, &err))?
     };
     let receiver = arguments[0]
         .process_value()
@@ -59,7 +59,7 @@ pub extern "C" fn receive(
         process.clone()
     } else {
         this.process_value()
-            .map_err(|err| process.allocate_string(state, &err))?
+            .map_err(|err: String| process.allocate_string(state, &err))?
     };
     let proc = process;
     if let Some(msg) = proc.receive_message() {
@@ -83,7 +83,7 @@ pub extern "C" fn wait_for_message(
         process.clone()
     } else {
         this.process_value()
-            .map_err(|err| process.allocate_string(state, &err))?
+            .map_err(|err: String| process.allocate_string(state, &err))?
     };
     process.waiting_for_message();
     if let Some(time) = arguments.get(0) {
@@ -127,7 +127,7 @@ pub extern "C" fn has_messages(
         process.clone()
     } else {
         this.process_value()
-            .map_err(|err| process.allocate_string(state, &err))?
+            .map_err(|err: String| process.allocate_string(state, &err))?
     };
     Ok(Return::Value(Value::from(if process.has_messages() {
         VTag::True

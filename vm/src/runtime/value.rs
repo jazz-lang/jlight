@@ -2,7 +2,6 @@ use super::cell::*;
 use super::process::*;
 use super::state::*;
 use crate::util::arc::Arc;
-use std::sync::atomic::Ordering;
 pub type EncodedValue = i64;
 
 #[derive(Copy, Clone)]
@@ -71,7 +70,7 @@ impl Value {
             pub const VALUE_DELETED: i32 = 0x4;
         }
     }
-
+    #[inline(always)]
     pub fn empty() -> Self {
         Self {
             u: EncodedValueDescriptor {

@@ -81,7 +81,7 @@ impl Runtime {
         true
     }
     pub fn throw(&self, process: &Arc<Process>, value: Value) -> Result<Value, Value> {
-        if let Some(mut table) = process.local_data_mut().catch_tables.pop() {
+        if let Some(table) = process.local_data_mut().catch_tables.pop() {
             let mut catch_ctx = table.context.replace(Context::new());
             catch_ctx.set_register(table.register, value);
             catch_ctx.bindex = table.jump_to as _;
