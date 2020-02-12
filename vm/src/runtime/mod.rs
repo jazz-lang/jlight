@@ -1,7 +1,9 @@
 pub mod cell;
 pub mod channel;
+pub mod config;
 pub mod module;
 pub mod process;
+pub mod process_functions;
 pub mod scheduler;
 pub mod state;
 pub mod value;

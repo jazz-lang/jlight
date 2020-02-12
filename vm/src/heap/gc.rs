@@ -37,6 +37,15 @@ pub struct GC {
 }
 
 impl GC {
+    pub fn new() -> Self {
+        Self {
+            tmp_space: space::Space::empty(),
+            grey_items: LinkedList::new(GCValueAdapter::new()),
+            black_items: LinkedList::new(GCValueAdapter::new()),
+            gc_ty: GCType::None,
+        }
+    }
+
     pub fn collect_garbage(&mut self, heap: &mut Heap) {
         if heap.needs_gc == GCType::None {
             heap.needs_gc = GCType::Young;
@@ -51,7 +60,24 @@ impl GC {
         let mut tmp_space = super::space::Space::new(space);
         std::mem::swap(&mut self.tmp_space, &mut tmp_space);
         self.process_grey(heap);
-
+        heap.allocated.retain(|cell| {
+            let in_current_space = self.is_in_current_space(cell);
+            if in_current_space {
+                if cell.is_marked() || cell.is_soft_marked() {
+                    if cell.is_marked() {
+                        cell.mark(false);
+                    }
+                    return true;
+                } else {
+                    unsafe {
+                        std::ptr::drop_in_place(cell.raw.raw);
+                    }
+                    false
+                }
+            } else {
+                true
+            }
+        });
         while let Some(item) = self.black_items.pop_back() {
             item.value.mark(false);
             item.value.soft_mark(false);
@@ -66,6 +92,7 @@ impl GC {
         if self.gc_ty != GCType::Young || heap.needs_gc == GCType::Young {
             heap.needs_gc = GCType::Young;
         } else {
+            // Do GC for old space.
             self.collect_garbage(heap);
         }
     }
@@ -83,7 +110,7 @@ impl GC {
             let mut value = self.grey_items.pop_back().unwrap();
 
             if !value.value.is_marked() {
-                if !self.is_in_current_space(&value) {
+                if !self.is_in_current_space(&value.value) {
                     if !value.value.is_soft_marked() {
                         value.value.soft_mark(true);
                         value.value.mark(true);
@@ -127,11 +154,14 @@ impl GC {
         }
     }
 
-    pub fn is_in_current_space(&self, value: &GCValue) -> bool {
+    pub fn is_in_current_space(&self, value: &CellPointer) -> bool {
+        if value.is_permanent() {
+            return false; // we don't want to move permanent objects
+        }
         if self.gc_ty == GCType::Old {
-            value.value.get().generation >= 5
+            value.get().generation >= 5
         } else {
-            value.value.get().generation < 5
+            value.get().generation < 5
         }
     }
 }

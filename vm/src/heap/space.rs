@@ -14,6 +14,16 @@ pub struct Space {
 }
 
 impl Space {
+    pub fn empty() -> Self {
+        Self {
+            top: Address::null(),
+            limit: Address::null(),
+            pages: LinkedList::new(SpaceAdapter::new()),
+            size: 0,
+            page_size: 0,
+            size_limit: 0,
+        }
+    }
     pub fn new(page_size: usize) -> Self {
         let mut pages = LinkedList::new(SpaceAdapter::new());
         let page = Page::new(page_size);
@@ -81,7 +91,7 @@ impl Space {
 
     pub fn swap(&mut self, space: &mut Space) {
         self.clear();
-        while self.pages.is_empty() != true {
+        while space.pages.is_empty() != true {
             self.pages.push_back(space.pages.pop_back().unwrap());
             self.size += self.pages.back().get().unwrap().size;
         }

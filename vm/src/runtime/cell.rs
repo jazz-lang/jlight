@@ -1,11 +1,16 @@
 use super::module::Module;
+use super::process::Process;
 use super::state::*;
 use super::value::*;
 use crate::bytecode;
 use crate::heap::space::Space;
+use crate::interpreter::context::Context;
 use crate::util::arc::Arc;
+use crate::util::ptr::*;
+
 use crate::util::tagged::*;
 use bytecode::basicblock::BasicBlock;
+use std::fs::File;
 use std::string::String;
 use std::vec::Vec;
 pub const MIN_OLD_SPACE_GENERATION: u8 = 5;
@@ -20,13 +25,7 @@ macro_rules! push_collection {
     }};
 }
 
-pub enum NativeResult {
-    Error(Value),
-    Ok(Value),
-    YieldProcess,
-}
-
-pub type NativeFn = extern "C" fn(Value, &[Value]) -> NativeResult;
+pub type NativeFn = extern "C" fn(&RcState, &Arc<Process>, Value, &[Value]) -> Result<Value, Value>;
 pub struct Function {
     pub name: Arc<String>,
     pub upvalues: Vec<Value>,
@@ -36,15 +35,23 @@ pub struct Function {
     pub code: Arc<Vec<BasicBlock>>,
 }
 
+pub struct Generator {
+    pub function: Value,
+    pub context: Ptr<Context>,
+}
+
 pub enum CellValue {
     None,
     Number(f64),
     Bool(bool),
-    String(Arc<String>),
+    String(String),
     Array(Vec<Value>),
     ByteArray(Vec<u8>),
     Function(Function),
     Module(Arc<Module>),
+    Process(Arc<Process>),
+    Duration(std::time::Duration),
+    File(File),
 }
 
 pub const MARK_BIT: usize = 0;
@@ -324,7 +331,7 @@ impl CellPointer {
     }
 
     /// Adds an attribute to the object this pointer points to.
-    pub fn add_attribute(&self, state: &State, name: &Arc<String>, attr: Value) {
+    pub fn add_attribute(&self, _: &State, name: &Arc<String>, attr: Value) {
         self.get_mut().add_attribute(name.clone(), attr);
     }
 
@@ -353,6 +360,20 @@ impl CellPointer {
             self.get().lookup_attribute_in_self(name)
         }
     }
+    pub fn is_false(&self) -> bool {
+        if self.raw.is_null() {
+            return true;
+        }
+        if self.is_tagged_number() {
+            unreachable!()
+        } else {
+            match self.get().value {
+                CellValue::Bool(true) => false,
+                CellValue::Bool(false) => true,
+                _ => false,
+            }
+        }
+    }
 
     pub fn attributes(&self) -> Vec<Value> {
         if self.is_tagged_number() {
@@ -372,6 +393,107 @@ impl CellPointer {
             self.get().attribute_names()
         }
     }
+
+    pub fn is_function(&self) -> bool {
+        match self.get().value {
+            CellValue::Function(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_process(&self) -> bool {
+        match self.get().value {
+            CellValue::Process(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_module(&self) -> bool {
+        match self.get().value {
+            CellValue::Module(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_file(&self) -> bool {
+        match self.get().value {
+            CellValue::File(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_string(&self) -> bool {
+        match self.get().value {
+            CellValue::String(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_array(&self) -> bool {
+        match self.get().value {
+            CellValue::Array(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_byte_array(&self) -> bool {
+        match self.get().value {
+            CellValue::ByteArray(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        if self.is_tagged_number() {
+            unreachable!()
+        } else {
+            match self.get().value {
+                CellValue::String(ref s) => (*s).clone(),
+                CellValue::Array(ref array) => {
+                    use std::fmt::Write;
+                    let mut fmt_buf = String::new();
+                    for (i, object) in array.iter().enumerate() {
+                        write!(fmt_buf, "{}", object.to_string()).unwrap();
+                        if i != array.len() - 1 {
+                            write!(fmt_buf, ",").unwrap();
+                        }
+                    }
+
+                    fmt_buf
+                }
+                CellValue::Duration(d) => format!("Duration({})", d.as_millis()),
+                CellValue::Process(_) => String::from("Process"),
+                CellValue::File(_) => String::from("File"),
+                CellValue::ByteArray(ref array) => format!("ByteArray({:?})", array),
+                CellValue::Function(ref f) => format!(
+                    "function {}(...) {{...}}",
+                    if f.name.len() != 0 {
+                        (*f.name).clone()
+                    } else {
+                        "<anonymous>".to_owned()
+                    }
+                ),
+                CellValue::Number(n) => n.to_string(),
+                CellValue::Module(_) => String::from("Module"),
+                CellValue::None => {
+                    if self.get().has_attributes() {
+                        use std::fmt::Write;
+                        let mut fmt_buf = String::new();
+                        write!(fmt_buf, "{{\n").unwrap();
+                        for (i, (key, value)) in
+                            self.get().attributes.as_ref().unwrap().iter().enumerate()
+                        {
+                            write!(fmt_buf, "  {}: {}\n", key, value.to_string()).unwrap();
+                        }
+
+                        fmt_buf
+                    } else {
+                        String::from("{}")
+                    }
+                }
+                CellValue::Bool(x) => x.to_string(),
+            }
+        }
+    }
 }
 
 impl Copy for CellPointer {}
@@ -384,5 +506,19 @@ impl Clone for CellPointer {
 impl PartialEq for CellPointer {
     fn eq(&self, other: &Self) -> bool {
         self.raw.untagged() == other.raw.untagged()
+    }
+}
+
+use std::fmt;
+
+impl fmt::Debug for CellPointer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.to_string())
+    }
+}
+
+impl fmt::Display for CellPointer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }

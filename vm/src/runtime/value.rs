@@ -1,4 +1,6 @@
 use super::cell::*;
+use super::process::*;
+use super::state::*;
 use crate::util::arc::Arc;
 use std::sync::atomic::Ordering;
 pub type EncodedValue = i64;
@@ -177,6 +179,130 @@ impl Value {
     }
     pub fn as_int32(&self) -> i32 {
         unsafe { self.u.as_int64 as i32 }
+    }
+
+    pub fn add_attribute(&self, state: &RcState, name: Arc<String>, value: Value) {
+        if self.is_number() {
+            state.number_prototype.add_attribute(state, name, value);
+        } else if self.is_bool() {
+            state.boolean_prototype.add_attribute(state, name, value);
+        } else if self.is_null_or_undefined() {
+            return;
+        } else {
+            self.as_cell().add_attribute(&**state, &name, value);
+        }
+    }
+
+    pub fn lookup_attribute_in_self(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
+        if self.is_number() {
+            state.number_prototype.lookup_attribute_in_self(state, name)
+        } else if self.is_bool() {
+            state
+                .boolean_prototype
+                .lookup_attribute_in_self(state, name)
+        } else if self.is_null_or_undefined() {
+            return Some(Value::from(VTag::Undefined));
+        } else {
+            return self.as_cell().lookup_attribute_in_self(state, name);
+        }
+    }
+
+    pub fn lookup_attribute(&self, state: &RcState, name: &Arc<String>) -> Option<Value> {
+        if self.is_number() {
+            state
+                .number_prototype
+                .as_cell()
+                .lookup_attribute(state, name)
+        } else if self.is_bool() {
+            state
+                .boolean_prototype
+                .as_cell()
+                .lookup_attribute(state, name)
+        } else if self.is_null_or_undefined() {
+            return Some(Value::from(VTag::Undefined));
+        } else {
+            return self.as_cell().lookup_attribute(state, name);
+        }
+    }
+
+    pub fn to_boolean(&self) -> bool {
+        if self.is_null_or_undefined() {
+            return false;
+        }
+        if self.is_number() {
+            return self.to_number() == 1.0;
+        }
+
+        !unsafe { self.u.ptr.is_false() }
+    }
+
+    pub fn to_number(&self) -> f64 {
+        if self.is_int32() {
+            return self.as_int32() as _;
+        }
+        if self.is_double() {
+            return self.as_double();
+        }
+
+        self.to_number_slow()
+    }
+
+    pub fn to_number_slow(&self) -> f64 {
+        if self.is_true() {
+            return 1.0;
+        }
+        if self.is_false() {
+            return 0.0;
+        }
+
+        std::f64::NAN
+    }
+    pub fn process_value(&self) -> Result<Arc<Process>, String> {
+        if !self.is_cell() {
+            return Err("Value not a process".to_owned());
+        }
+        let cell = self.as_cell();
+        if !cell.is_process() {
+            return Err("Value not a process".to_owned());
+        } else {
+            match &cell.get().value {
+                CellValue::Process(proc) => Ok(proc.clone()),
+                _ => unsafe { std::hint::unreachable_unchecked() },
+            }
+        }
+    }
+    pub fn to_string(&self) -> String {
+        if self.is_bool() {
+            if self.is_true() {
+                String::from("true")
+            } else {
+                String::from("false")
+            }
+        } else if self.is_number() {
+            self.to_number().to_string()
+        } else if self.is_null_or_undefined() {
+            if self.is_undefined() {
+                String::from("undefined")
+            } else {
+                String::from("null")
+            }
+        } else {
+            self.as_cell().to_string()
+        }
+    }
+}
+
+use std::fmt;
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.to_string())
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
 

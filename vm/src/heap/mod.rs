@@ -45,14 +45,17 @@ pub struct Heap {
     pub new_space: space::Space,
     pub old_space: space::Space,
     pub needs_gc: GCType,
+    /// We keep track of all allocated objects so we can properly deallocate them at GC cycle or when this heap is destroyed.
+    pub allocated: Vec<CellPointer>,
 }
 
 impl Heap {
-    pub fn new(page_size: usize) -> Self {
+    pub fn new(young_page_size: usize, old_page_size: usize) -> Self {
         Self {
-            new_space: space::Space::new(page_size),
-            old_space: space::Space::new(page_size),
+            new_space: space::Space::new(young_page_size),
+            old_space: space::Space::new(old_page_size),
             needs_gc: GCType::None,
+            allocated: Vec::new(),
         }
     }
 
@@ -68,6 +71,8 @@ impl Heap {
         let to_copy = to_copy.get();
         let value_copy = match &to_copy.value {
             CellValue::None => CellValue::None,
+            CellValue::Duration(d) => CellValue::Duration(d.clone()),
+            CellValue::File(_) => panic!("Cannot copy file"),
             CellValue::Number(x) => CellValue::Number(*x),
             CellValue::Bool(x) => CellValue::Bool(*x),
             CellValue::String(x) => CellValue::String(x.clone()),
@@ -100,6 +105,7 @@ impl Heap {
             }
             CellValue::ByteArray(array) => CellValue::ByteArray(array.clone()),
             CellValue::Module(module) => CellValue::Module(module.clone()),
+            CellValue::Process(proc) => CellValue::Process(proc.clone()),
         };
         let mut copy = if let Some(proto_ptr) = to_copy.prototype {
             let proto_copy = self.copy_object(Value::from(proto_ptr));
@@ -136,8 +142,23 @@ impl Heap {
             result.write(cell);
         }
         self.needs_gc = if needs_gc { tenure } else { GCType::None };
+        self.allocated.push(CellPointer {
+            raw: crate::util::tagged::TaggedPointer::new(result),
+        });
         CellPointer {
             raw: crate::util::tagged::TaggedPointer::new(result),
         }
+    }
+}
+
+impl Drop for Heap {
+    fn drop(&mut self) {
+        while let Some(cell) = self.allocated.pop() {
+            unsafe {
+                std::ptr::drop_in_place(cell.raw.raw);
+            }
+        }
+        self.new_space.clear();
+        self.old_space.clear();
     }
 }

@@ -1,8 +1,9 @@
 use super::cell::*;
 use super::channel::Channel;
 use super::scheduler::timeout::*;
+use super::state::*;
 use super::value::*;
-use crate::heap::{gc::GC, Heap};
+use crate::heap::{gc::*, GCType, Heap};
 use crate::interpreter::context::*;
 use crate::util;
 use parking_lot::Mutex;
@@ -61,7 +62,6 @@ pub struct LocalData {
     pub gc: GC,
     pub heap: Heap,
     pub thread_id: Option<u8>,
-    pub dead_contexts: Vec<Ptr<Context>>,
 }
 
 pub struct Process {
@@ -89,6 +89,52 @@ pub struct Process {
 }
 
 impl Process {
+    pub fn with_rc(context: Context, config: &super::config::Config) -> Arc<Self> {
+        let local_data = LocalData {
+            heap: Heap::new(config.young_size, config.old_size),
+            gc: GC::new(),
+            channel: Mutex::new(Channel::new()),
+            catch_tables: vec![],
+            context: Ptr::new(context),
+            status: ProcessStatus::new(),
+            thread_id: None,
+        };
+
+        Arc::new(Self {
+            waiting_for_message: AtomicBool::new(false),
+            suspended: TaggedPointer::null(),
+            local_data: Ptr::new(local_data),
+        })
+    }
+
+    pub fn from_function(
+        value: Value,
+        config: &super::config::Config,
+    ) -> Result<Arc<Self>, String> {
+        if value.is_cell() == false {
+            return Err("Expected function to Process.spawn".to_owned());
+        };
+
+        let value = value.as_cell();
+        match value.get().value {
+            CellValue::Function(ref function) => {
+                let context = Context {
+                    bindex: 0,
+                    index: 0,
+                    code: function.code.clone(),
+                    function: value,
+                    parent: None,
+                    module: function.module.clone(),
+                    registers: [Value::from(VTag::Undefined); 48],
+                    stack: vec![],
+                };
+
+                Ok(Self::with_rc(context, config))
+            }
+            _ => return Err("Expected function to Process.spawn".to_owned()),
+        }
+    }
+
     pub fn local_data(&self) -> &LocalData {
         self.local_data.get()
     }
@@ -203,6 +249,18 @@ impl Process {
         self.local_data_mut().channel.lock().send(message);
     }
 
+    pub fn waiting_for_message(&self) {
+        self.waiting_for_message.store(true, Ordering::Release);
+    }
+
+    pub fn no_longer_waiting_for_message(&self) {
+        self.waiting_for_message.store(false, Ordering::Release);
+    }
+
+    pub fn is_waiting_for_message(&self) -> bool {
+        self.waiting_for_message.load(Ordering::Acquire)
+    }
+
     pub fn receive_message(&self) -> Option<Value> {
         self.local_data_mut().channel.lock().receive()
     }
@@ -252,6 +310,28 @@ impl Process {
 
         let local_data = self.local_data_mut();
         local_data.gc.collect_garbage(&mut local_data.heap);
+    }
+
+    pub fn allocate_string(&self, state: &RcState, string: &str) -> Value {
+        let local_data = self.local_data_mut();
+        let cell = local_data.heap.allocate(
+            GCType::Young,
+            Cell::with_prototype(
+                CellValue::String(String::from(string)),
+                state.string_prototype.as_cell(),
+            ),
+        );
+        Value::from(cell)
+    }
+
+    pub fn has_messages(&self) -> bool {
+        self.local_data().channel.lock().has_messages()
+    }
+
+    pub fn allocate(&self, cell: Cell) -> Value {
+        let local_data = self.local_data_mut();
+        let cell = local_data.heap.allocate(GCType::Young, cell);
+        Value::from(cell)
     }
 }
 
@@ -331,5 +411,16 @@ impl ProcessStatus {
 
     fn bit_is_set(&self, bit: u8) -> bool {
         self.bits.load(Ordering::Acquire) & bit == bit
+    }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        unsafe {
+            while !self.pop_context() {}
+            std::ptr::drop_in_place(self.local_data.raw);
+            std::ptr::drop_in_place(self.suspended.raw);
+        }
+        self.acquire_rescheduling_rights();
     }
 }

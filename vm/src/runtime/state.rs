@@ -18,6 +18,8 @@ pub struct State {
     pub generator_prototype: Value,
     pub process_prototype: Value,
     pub module_prototype: Value,
+    pub boolean_prototype: Value,
+    pub config: super::config::Config,
     pub byte_array_prototype: Value,
 }
 
@@ -35,7 +37,7 @@ fn nof_parallel_worker_threads(num: usize, den: usize, switch_pt: usize) -> usiz
 }
 
 impl State {
-    pub fn new() -> Arc<Self> {
+    pub fn new(config: super::config::Config) -> Arc<Self> {
         let mut perm = PermanentHeap::new(2 & 1024 * 1024);
         let object_prototype = perm.allocate_empty();
         let string_prototype = perm.allocate_empty();
@@ -45,6 +47,7 @@ impl State {
         let generator_prototype = perm.allocate_empty();
         let process_prototype = perm.allocate_empty();
         let module_prototype = perm.allocate_empty();
+        let boolean_prototype = perm.allocate_empty();
         /*
         Arc::new(Self {
             scheduler: ProcessScheduler::new(
@@ -55,6 +58,57 @@ impl State {
 
         })*/
         unimplemented!()
+    }
+
+    pub fn allocate_native_fn(
+        &self,
+        native_fn: super::cell::NativeFn,
+        name: &str,
+        argc: i32,
+    ) -> CellPointer {
+        let function = Function {
+            name: Arc::new(name.to_owned()),
+            upvalues: vec![],
+            code: Arc::new(vec![]),
+            native: Some(native_fn),
+            argc,
+            module: Arc::new(super::module::Module { globals: vec![] }),
+        };
+
+        let cell = self
+            .perm_heap
+            .lock()
+            .allocate(Cell::with_prototype(
+                CellValue::Function(function),
+                self.function_prototype.as_cell(),
+            ))
+            .as_cell();
+        cell
+    }
+    pub fn allocate_native_fn_with_name(
+        &self,
+        native_fn: super::cell::NativeFn,
+        name: Arc<String>,
+        argc: i32,
+    ) -> CellPointer {
+        let function = Function {
+            name,
+            upvalues: vec![],
+            code: Arc::new(vec![]),
+            native: Some(native_fn),
+            argc,
+            module: Arc::new(super::module::Module { globals: vec![] }),
+        };
+
+        let cell = self
+            .perm_heap
+            .lock()
+            .allocate(Cell::with_prototype(
+                CellValue::Function(function),
+                self.function_prototype.as_cell(),
+            ))
+            .as_cell();
+        cell
     }
 }
 
