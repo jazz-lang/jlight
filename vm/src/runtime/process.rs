@@ -50,7 +50,7 @@ impl RescheduleRights {
 pub struct CatchTable {
     pub jump_to: u16,
     pub context: Ptr<Context>,
-    pub register: u8,
+    pub register: u16,
 }
 
 pub struct LocalData {
@@ -64,6 +64,9 @@ pub struct LocalData {
     pub thread_id: Option<u8>,
 }
 
+/// Lightweight "green" process.
+///
+/// This sturcture represents lightweight process. Each process scheduled by the virtual machine.
 pub struct Process {
     pub local_data: Ptr<LocalData>,
     /// If the process is waiting for a message.
@@ -127,6 +130,9 @@ impl Process {
                     module: function.module.clone(),
                     registers: [Value::from(VTag::Undefined); 48],
                     stack: vec![],
+                    return_register: None,
+                    terminate_upon_return: true,
+                    n: 0,
                 };
 
                 Ok(Self::with_rc(context, config))

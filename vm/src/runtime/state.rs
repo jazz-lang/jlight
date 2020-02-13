@@ -21,8 +21,9 @@ pub struct State {
     pub process_prototype: Value,
     pub module_prototype: Value,
     pub boolean_prototype: Value,
-    pub config: super::config::Config,
     pub byte_array_prototype: Value,
+    pub static_variables: ahash::AHashMap<String, Value>,
+    pub config: super::config::Config,
 }
 
 #[inline]
@@ -40,7 +41,7 @@ fn nof_parallel_worker_threads(num: usize, den: usize, switch_pt: usize) -> usiz
 
 impl State {
     pub fn new(config: super::config::Config) -> Arc<Self> {
-        let mut perm = PermanentHeap::new(2 * 1024 * 1024);
+        let mut perm = PermanentHeap::new(config.perm_size);
         let object_prototype = perm.allocate_empty();
         let string_prototype = perm.allocate_empty();
         let array_prototype = perm.allocate_empty();
@@ -50,6 +51,7 @@ impl State {
         let process_prototype = perm.allocate_empty();
         let module_prototype = perm.allocate_empty();
         let boolean_prototype = perm.allocate_empty();
+        let byte_array_prototype = perm.allocate_empty();
         string_prototype.set_prototype(object_prototype);
         array_prototype.set_prototype(object_prototype);
         number_prototype.set_prototype(object_prototype);
@@ -58,16 +60,44 @@ impl State {
         process_prototype.set_prototype(object_prototype);
         module_prototype.set_prototype(object_prototype);
         boolean_prototype.set_prototype(object_prototype);
-        /*
-        Arc::new(Self {
-            scheduler: ProcessScheduler::new(
-                nof_parallel_worker_threads(5, 8, 8),
-                nof_parallel_worker_threads(5, 8, 8),
-            ),
-            timeout_worker: TimeoutWorker::new(),
+        byte_array_prototype.set_prototype(object_prototype);
+        let primary = if let Some(prim) = config.primary {
+            prim
+        } else {
+            nof_parallel_worker_threads(5, 8, 8)
+        };
+        let blocking = if let Some(blocking) = config.blocking {
+            blocking
+        } else {
+            nof_parallel_worker_threads(5, 8, 8)
+        };
+        let scheduler = ProcessScheduler::new(primary, blocking);
+        let timeout_worker = TimeoutWorker::new();
+        let gc_workers = if let Some(c) = config.gc_workers {
+            c
+        } else {
+            nof_parallel_worker_threads(5, 8, 8)
+        };
+        let gc_pool = GcPool::new(gc_workers);
 
-        })*/
-        unimplemented!()
+        Arc::new(Self {
+            scheduler,
+            timeout_worker,
+            gc_pool,
+            perm_heap: Mutex::new(perm),
+            object_prototype,
+            string_prototype,
+            array_prototype,
+            number_prototype,
+            boolean_prototype,
+            byte_array_prototype,
+            process_prototype,
+            module_prototype,
+            function_prototype,
+            generator_prototype,
+            static_variables: ahash::AHashMap::new(),
+            config,
+        })
     }
 
     pub fn allocate_native_fn(

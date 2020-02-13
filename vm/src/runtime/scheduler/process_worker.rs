@@ -3,10 +3,8 @@ use super::state::*;
 use super::worker::*;
 use crate::runtime::process::Process;
 use crate::util::arc::Arc;
-use rand::distributions::uniform::{SampleBorrow, SampleUniform};
-use rand::distributions::{Distribution, Standard};
 use rand::rngs::ThreadRng;
-use rand::{thread_rng, Rng};
+use rand::thread_rng;
 /// The state that a worker is in.
 #[derive(Eq, PartialEq, Debug)]
 pub enum Mode {

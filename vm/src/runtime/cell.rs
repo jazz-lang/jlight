@@ -118,7 +118,7 @@ impl Cell {
             return;
         }
 
-        drop(unsafe { Box::from_raw(self.attributes.untagged()) });
+        drop(Box::from_raw(self.attributes.untagged()));
 
         self.attributes = TaggedPointer::null();
     }
@@ -492,11 +492,12 @@ impl CellPointer {
                         use std::fmt::Write;
                         let mut fmt_buf = String::new();
                         write!(fmt_buf, "{{\n").unwrap();
-                        for (i, (key, value)) in
+                        for (_, (key, value)) in
                             self.get().attributes.as_ref().unwrap().iter().enumerate()
                         {
                             write!(fmt_buf, "  {}: {}\n", key, value.to_string()).unwrap();
                         }
+                        write!(fmt_buf, "\n}}").unwrap();
 
                         fmt_buf
                     } else {

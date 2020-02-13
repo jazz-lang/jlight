@@ -4,7 +4,6 @@ use crate::util::mem::Address;
 use crate::util::ptr::*;
 use crate::util::tagged::*;
 use intrusive_collections::{LinkedList, LinkedListLink};
-use space::*;
 pub struct GCValue {
     pub slot: *mut CellPointer,
     pub value: CellPointer,

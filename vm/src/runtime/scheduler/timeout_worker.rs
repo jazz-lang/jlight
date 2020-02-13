@@ -90,7 +90,7 @@ impl TimeoutWorker {
     fn is_alive(&self) -> bool {
         self.inner().alive
     }
-
+    #[allow(unused)]
     fn number_of_expired_timeouts(&self) -> f64 {
         self.expired.load(Ordering::Acquire) as f64
     }

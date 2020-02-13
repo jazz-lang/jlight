@@ -5,7 +5,7 @@ pub trait Worker<T: Send> {
     fn process_job(&mut self, job: T);
     fn queue(&self) -> &ArcQueue<T>;
     fn state(&self) -> &PoolState<T>;
-
+    #[allow(unreachable_code)]
     fn run(&mut self) {
         while self.state().is_alive() {
             if self.process_local_jobs() {

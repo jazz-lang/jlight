@@ -1,17 +1,20 @@
 pub mod context;
 
+use crate::bytecode::instruction::*;
 use crate::heap::*;
 use crate::runtime::*;
 use crate::util::arc::Arc;
+use crate::util::ptr::Ptr;
 use cell::*;
 use context::*;
 use gc_pool::Collection;
 use process::*;
 use scheduler::process_worker::ProcessWorker;
 use value::*;
+
 macro_rules! reset_context {
     ($process:expr, $context:ident, $index:ident,$bindex: ident) => {{
-        $context = $process.context_mut();
+        $context = $process.context_ptr();
         $index = $context.index;
         $bindex = $context.bindex;
     }};
@@ -31,13 +34,14 @@ macro_rules! throw {
         $context.index = $index;
         $context.bindex = $bindex;
         $rt.throw($proc, $value)?;
-        reset_context!($proc, $context, $index, $bindex)
+        reset_context!($proc, $context, $index, $bindex);
+        continue;
     };
 }
 
 macro_rules! throw_error_message {
     ($rt: expr,$proc: expr,$msg: expr,$context: ident,$index: ident,$bindex: ident) => {
-        let value = $process.allocate_string(&$rt.state, $msg);
+        let value = $proc.allocate_string(&$rt.state, $msg);
         throw!($rt, $proc, value, $context, $index, $bindex)
     };
 }
@@ -68,7 +72,62 @@ macro_rules! safepoint_and_reduce {
 impl Runtime {
     pub fn run(&self, worker: &mut ProcessWorker, process: &Arc<Process>) -> Result<Value, Value> {
         let mut reductions = 1000;
-        Ok(Value::empty())
+        let mut index;
+        let mut bindex;
+        let mut context: Ptr<Context>;
+        reset_context!(process, context, index, bindex);
+
+        loop {
+            let block = unsafe { context.code.get_unchecked(bindex) };
+            let ins = unsafe { block.instructions.get_unchecked(index) };
+            index += 1;
+            match *ins {
+                Instruction::Return(value) => {
+                    let value = if let Some(value) = value {
+                        context.get_register(value)
+                    } else {
+                        Value::from(VTag::Null)
+                    };
+                    self.clear_catch_tables(&context, process);
+                    if context.terminate_upon_return {
+                        return Ok(value);
+                    }
+
+                    if process.pop_context() {
+                        return Ok(value);
+                    }
+                    reset_context!(process, context, index, bindex);
+                    safepoint_and_reduce!(self, process, reductions);
+                }
+                Instruction::LoadNull(r) => context.set_register(r, Value::from(VTag::Null)),
+                Instruction::LoadUndefined(r) => {
+                    context.set_register(r, Value::from(VTag::Undefined))
+                }
+                Instruction::LoadInt(r, i) => context.set_register(r, Value::new_int(i)),
+                Instruction::LoadNumber(r, f) => {
+                    context.set_register(r, Value::new_double(f64::from_bits(f)))
+                }
+                Instruction::LoadTrue(r) => context.set_register(r, Value::from(VTag::True)),
+                Instruction::LoadFalse(r) => context.set_register(r, Value::from(VTag::False)),
+                Instruction::LoadById(to, obj, id) => {
+                    let id = context.module.globals[id as usize].to_string();
+                    let obj = context.get_register(obj);
+                    let field = obj.lookup_attribute(&self.state, &Arc::new(id.clone()));
+                    if field.is_none() {
+                        throw_error_message!(
+                            self,
+                            process,
+                            &format!("Field '{}' not found", id),
+                            context,
+                            index,
+                            bindex
+                        );
+                    }
+                    context.set_register(to, field.unwrap());
+                }
+                _ => unimplemented!(),
+            }
+        }
     }
     /// Returns true if a process should be suspended for garbage collection.
     pub fn gc_safepoint(&self, process: &Arc<Process>) -> bool {
@@ -92,7 +151,11 @@ impl Runtime {
             return Err(value);
         }
     }
-
+    pub fn clear_catch_tables(&self, exiting: &Ptr<Context>, proc: &Arc<Process>) {
+        proc.local_data_mut()
+            .catch_tables
+            .retain(|ctx| ctx.context.n < exiting.n);
+    }
     pub fn run_default_panic(&self, proc: &Arc<Process>, message: &Value) {
         runtime_panic(proc, message);
         self.terminate();

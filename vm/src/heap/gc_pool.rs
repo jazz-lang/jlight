@@ -45,6 +45,7 @@ impl WorkerTrait<Collection> for Worker {
 
 pub struct Collection {
     process: Arc<Process>,
+    #[allow(unused)]
     start_time: std::time::Instant,
 }
 

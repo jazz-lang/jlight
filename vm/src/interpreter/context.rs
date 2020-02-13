@@ -17,6 +17,9 @@ pub struct Context {
     pub bindex: usize,
     pub code: Arc<Vec<BasicBlock>>,
     pub function: CellPointer,
+    pub terminate_upon_return: bool,
+    pub return_register: Option<u16>,
+    pub n: usize,
 }
 
 impl Context {
@@ -36,22 +39,25 @@ impl Context {
             parent: None,
             index: 0,
             bindex: 0,
+            return_register: None,
             code: Arc::new(vec![]),
+            terminate_upon_return: false,
             function: CellPointer {
                 raw: crate::util::tagged::TaggedPointer::null(),
             },
+            n: 0,
         }
     }
 
-    pub fn set_register(&mut self, r: u8, value: Value) {
+    pub fn set_register(&mut self, r: u16, value: Value) {
         self.registers[r as usize] = value;
     }
 
-    pub fn get_register(&self, r: u8) -> Value {
+    pub fn get_register(&self, r: u16) -> Value {
         self.registers[r as usize]
     }
 
-    pub fn move_registers(&mut self, r0: u8, r1: u8) {
+    pub fn move_registers(&mut self, r0: u16, r1: u16) {
         let tmp = self.get_register(r0);
         self.registers[r0 as usize] = self.registers[r1 as usize];
         self.registers[r1 as usize] = tmp;
