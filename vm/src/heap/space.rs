@@ -1,6 +1,6 @@
 use crate::util::mem::*;
 use crate::util::ptr::*;
-use intrusive_collections::{LinkedList, LinkedListLink, UnsafeRef};
+use intrusive_collections::{LinkedList, LinkedListLink};
 
 intrusive_adapter!(pub SpaceAdapter = Box<Page> : Page {hook: LinkedListLink});
 
