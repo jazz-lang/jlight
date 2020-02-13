@@ -125,6 +125,58 @@ impl Runtime {
                     }
                     context.set_register(to, field.unwrap());
                 }
+                Instruction::Push(r) => {
+                    let value = context.get_register(r);
+                    context.stack.push(value);
+                }
+                Instruction::Pop(r) => {
+                    let value = context.stack.pop().unwrap_or(Value::from(VTag::Undefined));
+                    context.set_register(r, value);
+                }
+                Instruction::Branch(block) => bindex = block as usize,
+                Instruction::ConditionalBranch(r, if_true, if_false) => {
+                    let value = context.get_register(r);
+                    if value.to_boolean() {
+                        bindex = if_true as _;
+                    } else {
+                        bindex = if_false as _;
+                    }
+                }
+                Instruction::MakeEnv(function, count) => {
+                    let mut upvalues = vec![];
+                    for _ in 0..count {
+                        upvalues.push(context.stack.pop().unwrap());
+                    }
+
+                    let function = context.get_register(function);
+                    if function.is_cell() {
+                        match function.as_cell().get_mut().value {
+                            CellValue::Function(ref mut f) => f.upvalues = upvalues,
+                            _ => {
+                                /*throw_error_message!(
+                                    self,
+                                    process,
+                                    &format!(
+                                        "MakeEnv: Function expected, found '{}'",
+                                        function.to_string()
+                                    ),
+                                    context,
+                                    index,
+                                    bindex
+                                );*/
+                                panic!(
+                                    "MakeEnv: Function expected, found '{}'",
+                                    function.to_string()
+                                );
+                            }
+                        }
+                    } else {
+                        panic!(
+                            "MakeEnv: Function expected, found '{}'",
+                            function.to_string()
+                        );
+                    }
+                }
                 _ => unimplemented!(),
             }
         }
