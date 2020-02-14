@@ -2,6 +2,7 @@ use super::module::Module;
 use super::process::Process;
 use super::state::*;
 use super::value::*;
+use super::*;
 use crate::bytecode;
 use crate::heap::space::Space;
 use crate::interpreter::context::Context;
@@ -54,7 +55,7 @@ pub enum CellValue {
     String(String),
     Array(Vec<Value>),
     ByteArray(Vec<u8>),
-    Function(Function),
+    Function(Arc<Function>),
     Module(Arc<Module>),
     Process(Arc<Process>),
     Duration(std::time::Duration),
@@ -118,7 +119,7 @@ impl Cell {
             return;
         }
 
-        drop(Box::from_raw(self.attributes.untagged()));
+        drop(unsafe { Box::from_raw(self.attributes.untagged()) });
 
         self.attributes = TaggedPointer::null();
     }
@@ -240,7 +241,7 @@ pub struct CellPointer {
 }
 
 impl CellPointer {
-    pub fn function_value(&self) -> Result<&Function, String> {
+    pub fn function_value(&self) -> Result<&Arc<Function>, String> {
         match &self.get().value {
             CellValue::Function(func) => Ok(func),
             _ => Err("Not a function".to_owned()),
@@ -523,6 +524,14 @@ impl PartialEq for CellPointer {
     }
 }
 
+impl From<*const Cell> for CellPointer {
+    fn from(x: *const Cell) -> Self {
+        Self {
+            raw: TaggedPointer::new(x as *mut _),
+        }
+    }
+}
+
 use std::fmt;
 
 impl fmt::Debug for CellPointer {
@@ -535,4 +544,30 @@ impl fmt::Display for CellPointer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_string())
     }
+}
+
+#[no_mangle]
+pub extern "C" fn cell_add_attribute(cell: *const Cell, key: Value, value: Value) {
+    let key = key.to_string();
+    let key_ptr = Arc::new(key);
+    let pointer = CellPointer::from(cell);
+    pointer.add_attribute(&*RUNTIME.state, &key_ptr, value);
+}
+
+#[no_mangle]
+pub extern "C" fn cell_lookup_attribute(cell: *const Cell, key: Value) -> Value {
+    let key = key.to_string();
+    let key_ptr = Arc::new(key);
+    let pointer = CellPointer::from(cell);
+    if let Some(value) = pointer.lookup_attribute(&RUNTIME.state, &key_ptr) {
+        return value;
+    } else {
+        Value::empty()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn cell_set_prototype(cell: *const Cell, prototype: *const Cell) {
+    let pointer = CellPointer::from(cell);
+    pointer.set_prototype(CellPointer::from(prototype));
 }

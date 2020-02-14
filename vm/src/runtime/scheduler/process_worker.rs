@@ -57,6 +57,23 @@ impl ProcessWorker {
             mode: Mode::Normal,
         }
     }
+    /// Changes the worker state so it operates in exclusive mode.
+    ///
+    /// When in exclusive mode, only the currently running job will be allowed
+    /// to run on this worker. All other jobs are pushed back into the global
+    /// queue.
+    pub fn enter_exclusive_mode(&mut self) {
+        self.queue.move_external_jobs();
+
+        while let Some(job) = self.queue.pop() {
+            self.state.push_global(job);
+        }
+
+        self.mode = Mode::Exclusive;
+    }
+    pub fn leave_exclusive_mode(&mut self) {
+        self.mode = Mode::Normal;
+    }
     /// Performs a single iteration of the normal work loop.
     fn normal_iteration(&mut self) {
         if self.process_local_jobs() {
@@ -113,6 +130,7 @@ impl Worker<Arc<Process>> for ProcessWorker {
             };
         }
     }
-    /// TODO
-    fn process_job(&mut self, _job: Arc<Process>) {}
+    fn process_job(&mut self, job: Arc<Process>) {
+        crate::runtime::RUNTIME.run_with_error_handling(self, &job);
+    }
 }

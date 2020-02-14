@@ -102,7 +102,7 @@ impl Process {
             status: ProcessStatus::new(),
             thread_id: None,
         };
-
+        assert!(local_data.context.raw.is_null() == false);
         Arc::new(Self {
             waiting_for_message: AtomicBool::new(false),
             suspended: TaggedPointer::null(),
@@ -130,6 +130,7 @@ impl Process {
                     module: function.module.clone(),
                     registers: [Value::from(VTag::Undefined); 48],
                     stack: vec![],
+                    this: Value::from(VTag::Undefined),
                     return_register: None,
                     terminate_upon_return: true,
                     n: 0,
@@ -148,11 +149,32 @@ impl Process {
     pub fn local_data_mut(&self) -> &mut LocalData {
         self.local_data.get()
     }
+    pub fn is_pinned(&self) -> bool {
+        self.thread_id().is_some()
+    }
 
+    pub fn terminate(&self, _: &State) {
+        // The channel lock _must_ be acquired first, otherwise we may end up
+        // reclaiming memory while another process is allocating message into
+        // them.
+        let _channel = self.local_data().channel.lock();
+        // Once terminated we don't want to receive any messages any more, as
+        // they will never be received and thus lead to an increase in memory.
+        // Thus, we mark the process as terminated. We must do this _after_
+        // acquiring the lock to ensure other processes sending messages will
+        // observe the right value.
+        self.set_terminated();
+
+        self.local_data_mut().heap.old_space.clear();
+        self.local_data_mut().heap.new_space.clear();
+    }
     pub fn pop_context(&self) -> bool {
         let local_data = self.local_data_mut();
         if let Some(parent) = local_data.context.parent.take() {
             let old = local_data.context;
+            if old.raw.is_null() {
+                return true;
+            }
             unsafe {
                 std::ptr::drop_in_place(old.raw);
             }
@@ -423,9 +445,9 @@ impl ProcessStatus {
 impl Drop for Process {
     fn drop(&mut self) {
         unsafe {
-            while !self.pop_context() {}
-            std::ptr::drop_in_place(self.local_data.raw);
-            std::ptr::drop_in_place(self.suspended.raw);
+            //while !self.pop_context() {}
+            //            std::ptr::drop_in_place(self.local_data.raw);
+            //          std::ptr::drop_in_place(self.suspended.raw);
         }
         self.acquire_rescheduling_rights();
     }

@@ -7,6 +7,16 @@ pub struct BasicBlock {
     pub instructions: Vec<Instruction>,
 }
 
+impl BasicBlock {
+    pub fn new(ins: Vec<Instruction>, idx: usize) -> Self {
+        Self {
+            instructions: ins,
+            index: idx,
+            successors: vec![],
+            predecessors: vec![],
+        }
+    }
+}
 use core::hash::{Hash, Hasher};
 
 impl Hash for BasicBlock {

@@ -105,7 +105,7 @@ impl GcPool {
         rt_state: RcState,
     ) -> thread::JoinHandle<()> {
         let state = self.state.clone();
-
+        log::trace!("Spawn GC Worker {}", id);
         thread::Builder::new()
             .name(format!("GC {}", id))
             .spawn(move || {

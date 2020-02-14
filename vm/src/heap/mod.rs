@@ -3,6 +3,7 @@ pub mod gc_pool;
 pub mod space;
 use crate::runtime::cell::*;
 use crate::runtime::value::*;
+use crate::util::arc::*;
 #[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
 pub enum GCType {
     None,
@@ -95,14 +96,14 @@ impl Heap {
                     .collect();
                 let native = function.native;
                 let code = function.code.clone();
-                CellValue::Function(Function {
+                CellValue::Function(Arc::new(Function {
                     name,
                     argc,
                     module,
                     upvalues,
                     native,
                     code,
-                })
+                }))
             }
             CellValue::ByteArray(array) => CellValue::ByteArray(array.clone()),
             CellValue::Module(module) => CellValue::Module(module.clone()),

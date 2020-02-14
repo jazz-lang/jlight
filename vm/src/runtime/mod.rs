@@ -11,7 +11,7 @@ pub mod value;
 use state::*;
 
 lazy_static::lazy_static!(
-    static ref RUNTIME: Runtime = Runtime::new();
+    pub static ref RUNTIME: Runtime = Runtime::new();
 );
 
 pub struct Runtime {
@@ -23,5 +23,16 @@ impl Runtime {
         Self {
             state: State::new(config::Config::default()),
         }
+    }
+
+    pub fn start_pools(&self) {
+        self.state.gc_pool.start(self.state.clone());
+        self.state.scheduler.blocking_pool.start();
+        let pguard = self.state.scheduler.primary_pool.start_main();
+        let state = self.state.clone();
+        std::thread::spawn(move || {
+            state.timeout_worker.run(&state.scheduler);
+        });
+        pguard.join().unwrap();
     }
 }

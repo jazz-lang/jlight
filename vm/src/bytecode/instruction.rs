@@ -43,5 +43,6 @@ pub enum Instruction {
     Push(u16),
     Pop(u16),
     Call(u16, u16, u16),
-    VirtCall(u16, u16, u16),
+    VirtCall(u16, u16, u16, u16),
+    New(u16, u16, u16),
 }

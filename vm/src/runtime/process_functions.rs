@@ -114,7 +114,7 @@ pub extern "C" fn wait_for_message(
     if process.has_messages() {
         attempt_to_reschedule_process(state, &process);
     }
-    Ok(Return::YieldProcess)
+    Ok(Return::SuspendProcess)
 }
 
 pub extern "C" fn has_messages(

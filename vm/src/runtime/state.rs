@@ -100,6 +100,12 @@ impl State {
         })
     }
 
+    pub fn allocate_fn(&self, fun: Function) -> Value {
+        Value::from(self.perm_heap.lock().allocate(Cell::with_prototype(
+            CellValue::Function(Arc::new(fun)),
+            self.function_prototype.as_cell(),
+        )))
+    }
     pub fn allocate_native_fn(
         &self,
         native_fn: super::cell::NativeFn,
@@ -122,7 +128,7 @@ impl State {
             .perm_heap
             .lock()
             .allocate(Cell::with_prototype(
-                CellValue::Function(function),
+                CellValue::Function(Arc::new(function)),
                 self.function_prototype.as_cell(),
             ))
             .as_cell();
@@ -150,7 +156,7 @@ impl State {
             .perm_heap
             .lock()
             .allocate(Cell::with_prototype(
-                CellValue::Function(function),
+                CellValue::Function(Arc::new(function)),
                 self.function_prototype.as_cell(),
             ))
             .as_cell();
