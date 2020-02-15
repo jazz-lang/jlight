@@ -9,8 +9,10 @@ use vm::util::arc::Arc;
 fn main() {
     simple_logger::init().unwrap();
     let mut m = Arc::new(Module::new("Main"));
-    let code =
-        basicblock::BasicBlock::new(vec![Instruction::LoadInt(0, 42), Instruction::Throw(0)], 0);
+    let code = basicblock::BasicBlock::new(
+        vec![Instruction::LoadInt(0, 42), Instruction::Return(Some(0))],
+        0,
+    );
     let func = Function {
         upvalues: vec![],
         name: Arc::new("main".to_owned()),
@@ -21,8 +23,12 @@ fn main() {
     };
     let value = RUNTIME.state.allocate_fn(func);
     let proc = Process::from_function(value, &config::Config::default()).unwrap();
+    let s = proc.allocate_string(&RUNTIME.state, "Wooooow!");
+    m.globals.push(s);
     RUNTIME.schedule_main_process(proc.clone());
     RUNTIME.start_pools();
 
     println!("{}", proc.is_terminated());
+
+    proc.do_gc();
 }

@@ -73,17 +73,32 @@ impl Context {
         while let Some(context) = current {
             context.registers.iter().for_each(|x| {
                 if x.is_cell() {
+                    unsafe {
+                        if x.u.as_int64 as u64 == 0xfffe00000000002a {
+                            panic!();
+                        }
+                    }
                     unsafe { cb(&x.u.ptr) }
                 }
             });
 
             context.stack.iter().for_each(|x| {
                 if x.is_cell() {
+                    unsafe {
+                        if x.u.as_int64 as u64 == 0xfffe00000000002a {
+                            panic!();
+                        }
+                    }
                     unsafe { cb(&x.u.ptr) }
                 }
             });
             context.module.globals.iter().for_each(|x| {
                 if x.is_cell() {
+                    unsafe {
+                        if x.u.as_int64 as u64 == 0xfffe00000000002a {
+                            panic!();
+                        }
+                    }
                     unsafe { cb(&x.u.ptr) }
                 }
             });
@@ -93,7 +108,7 @@ impl Context {
     }
 }
 
-/// Struct for iterating over an ExecutionContext and its parent contexts.
+/// Struct for iterating over an Context and its parent contexts.
 pub struct ExecutionContextIterator<'a> {
     current: Option<&'a Context>,
 }

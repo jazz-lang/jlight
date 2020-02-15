@@ -118,7 +118,7 @@ impl Runtime {
                 Instruction::LoadUndefined(r) => {
                     context.set_register(r, Value::from(VTag::Undefined))
                 }
-                Instruction::LoadInt(r, i) => context.set_register(r, Value::new_int(i)),
+                Instruction::LoadInt(r, i) => context.set_register(r, Value::new_int(i as _)),
                 Instruction::LoadNumber(r, f) => {
                     context.set_register(r, Value::new_double(f64::from_bits(f)))
                 }
@@ -563,7 +563,7 @@ impl Runtime {
     }
     /// Returns true if a process should be suspended for garbage collection.
     pub fn gc_safepoint(&self, process: &Arc<Process>) -> bool {
-        if process.local_data().heap.needs_gc != GCType::Young {
+        if !process.local_data().heap.should_collect() {
             return false;
         }
         self.state

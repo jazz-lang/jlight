@@ -3,7 +3,7 @@ use super::channel::Channel;
 use super::scheduler::timeout::*;
 use super::state::*;
 use super::value::*;
-use crate::heap::{gc::*, GCType, Heap};
+use crate::heap::{initialize_process_heap, GCType, HeapTrait};
 use crate::interpreter::context::*;
 use crate::util;
 use parking_lot::Mutex;
@@ -59,8 +59,7 @@ pub struct LocalData {
     /// Channel of this process. This channel is used like `std::sync::mpsc` channel.
     pub channel: Mutex<Channel>,
     pub status: ProcessStatus,
-    pub gc: GC,
-    pub heap: Heap,
+    pub heap: Box<dyn HeapTrait>,
     pub thread_id: Option<u8>,
 }
 
@@ -94,8 +93,7 @@ pub struct Process {
 impl Process {
     pub fn with_rc(context: Context, config: &super::config::Config) -> Arc<Self> {
         let local_data = LocalData {
-            heap: Heap::new(config.young_size, config.old_size),
-            gc: GC::new(),
+            heap: initialize_process_heap(config.gc, config),
             channel: Mutex::new(Channel::new()),
             catch_tables: vec![],
             context: Ptr::new(context),
@@ -165,8 +163,7 @@ impl Process {
         // observe the right value.
         self.set_terminated();
 
-        self.local_data_mut().heap.old_space.clear();
-        self.local_data_mut().heap.new_space.clear();
+        self.local_data_mut().heap.clear();
     }
     pub fn pop_context(&self) -> bool {
         let local_data = self.local_data_mut();
@@ -208,11 +205,41 @@ impl Process {
         self.local_data().context.get()
     }
 
-    pub fn trace<F>(&self, cb: F)
+    pub fn trace<F>(&self, mut cb: F)
     where
         F: FnMut(*const super::cell::CellPointer),
     {
-        self.local_data().context.trace(cb);
+        let ld = self.local_data();
+        let ctx = &ld.context;
+        if ctx.raw.is_null() {
+            return;
+        }
+        let mut current = Some(&**ctx);
+        while let Some(context) = current {
+            context.registers.iter().for_each(|x| {
+                if x.is_cell() && !x.is_null_or_undefined() && !x.is_empty() {
+                    unsafe { cb(&x.u.ptr) }
+                }
+            });
+
+            context.stack.iter().for_each(|x| {
+                if x.is_cell() {
+                    unsafe {
+                        if x.u.as_int64 as u64 == 0xfffe00000000002a {
+                            panic!();
+                        }
+                    }
+                    unsafe { cb(&x.u.ptr) }
+                }
+            });
+            context.module.globals.iter().for_each(|x| {
+                if x.is_cell() {
+                    unsafe { cb(&x.u.ptr) }
+                }
+            });
+            cb(&context.function);
+            current = context.parent.as_ref().map(|c| &**c);
+        }
     }
 
     pub fn suspend_with_timeout(&self, timeout: Arc<Timeout>) {
@@ -328,16 +355,16 @@ impl Process {
     pub fn do_gc(&self) {
         let channel = self.local_data().channel.lock();
         channel.trace(|pointer| {
-            self.local_data_mut().gc.schedule(pointer as *mut _);
+            self.local_data_mut().heap.schedule(pointer as *mut _);
         });
         self.trace(|pointer| {
             self.local_data_mut()
-                .gc
+                .heap
                 .schedule(pointer as *mut CellPointer);
         });
 
         let local_data = self.local_data_mut();
-        local_data.gc.collect_garbage(&mut local_data.heap);
+        local_data.heap.collect_garbage();
     }
 
     pub fn allocate_string(&self, state: &RcState, string: &str) -> Value {

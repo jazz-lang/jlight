@@ -26,6 +26,10 @@ macro_rules! push_collection {
     }};
 }
 
+pub const CELL_WHITE: u8 = 0x0;
+pub const CELL_GREY: u8 = 0x1;
+pub const CELL_BLACK: u8 = 0x2;
+
 pub enum Return {
     Value(Value),
     YieldProcess,
@@ -68,6 +72,7 @@ pub struct Cell {
     pub prototype: Option<CellPointer>,
     pub attributes: TaggedPointer<AttributesMap>,
     pub generation: u8,
+    pub color: u8,
     pub forward: crate::util::mem::Address,
 }
 
@@ -80,6 +85,7 @@ impl Cell {
             prototype: Some(prototype),
             attributes: TaggedPointer::null(),
             generation: 0,
+            color: CELL_WHITE,
             forward: crate::util::mem::Address::null(),
         }
     }
@@ -90,6 +96,7 @@ impl Cell {
             prototype: None,
             attributes: TaggedPointer::null(),
             generation: 0,
+            color: CELL_WHITE,
             forward: crate::util::mem::Address::null(),
         }
     }
@@ -283,6 +290,15 @@ impl CellPointer {
         self.get().attributes.bit_is_set(0)
     }
 
+    pub fn get_color(&self) -> u8 {
+        self.get().color
+    }
+
+    pub fn set_color(&self, mut color: u8) -> u8 {
+        std::mem::swap(&mut self.get_mut().color, &mut color);
+        color
+    }
+
     pub fn mark(&self, value: bool) {
         if value {
             self.get_mut().attributes.set_bit(0);
@@ -397,7 +413,8 @@ impl CellPointer {
         }
     }
     pub fn is_tagged_number(&self) -> bool {
-        self.raw.bit_is_set(0)
+        //self.raw.bit_is_set(0)
+        false
     }
 
     pub fn attribute_names(&self) -> Vec<&Arc<String>> {

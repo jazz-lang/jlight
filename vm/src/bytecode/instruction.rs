@@ -45,4 +45,5 @@ pub enum Instruction {
     Call(u16, u16, u16),
     VirtCall(u16, u16, u16, u16),
     New(u16, u16, u16),
+    Gc,
 }

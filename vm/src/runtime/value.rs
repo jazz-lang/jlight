@@ -130,7 +130,8 @@ impl Value {
     }
     #[inline(always)]
     pub fn is_cell(&self) -> bool {
-        unsafe { !(self.u.as_int64 & Self::NOT_CELL_MASK as i64) != 0 }
+        let x = unsafe { !(self.u.as_int64 & Self::NOT_CELL_MASK as i64) != 0 };
+        x && !self.is_number() && !self.is_any_int()
     }
     #[inline(always)]
     pub fn is_number(&self) -> bool {

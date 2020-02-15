@@ -11,6 +11,7 @@ pub struct Space {
     pub size: usize,
     pub size_limit: usize,
     pub page_size: usize,
+    pub allocated_size: usize,
 }
 
 impl Space {
@@ -20,6 +21,7 @@ impl Space {
             limit: Address::null(),
             pages: LinkedList::new(SpaceAdapter::new()),
             size: 0,
+            allocated_size: 0,
             page_size: 0,
             size_limit: 0,
         }
@@ -37,6 +39,7 @@ impl Space {
             size: 0,
             page_size,
             size_limit: 0,
+            allocated_size: 0,
         };
         space.compute_size_limit();
         space
@@ -80,7 +83,7 @@ impl Space {
                 self.add_page(even_bytes);
             }
         }
-
+        self.allocated_size += even_bytes;
         let result = self.top.deref();
         unsafe {
             *self.top.to_mut_ptr::<*mut u8>() =
@@ -95,6 +98,7 @@ impl Space {
             self.pages.push_back(space.pages.pop_back().unwrap());
             self.size += self.pages.back().get().unwrap().size;
         }
+        self.allocated_size = space.allocated_size;
         let page = self.pages.back().get().unwrap();
         self.top = Address::from_ptr(&page.top);
         self.limit = Address::from_ptr(&page.limit);
