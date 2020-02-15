@@ -472,9 +472,9 @@ impl ProcessStatus {
 impl Drop for Process {
     fn drop(&mut self) {
         unsafe {
-            //while !self.pop_context() {}
-            //            std::ptr::drop_in_place(self.local_data.raw);
-            //          std::ptr::drop_in_place(self.suspended.raw);
+            while !self.pop_context() {}
+            std::ptr::drop_in_place(self.local_data.raw);
+            std::ptr::drop_in_place(self.suspended.raw);
         }
         self.acquire_rescheduling_rights();
     }

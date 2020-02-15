@@ -31,4 +31,6 @@ fn main() {
     println!("{}", proc.is_terminated());
 
     proc.do_gc();
+    m.globals.pop();
+    proc.do_gc();
 }

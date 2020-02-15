@@ -26,9 +26,11 @@ macro_rules! push_collection {
     }};
 }
 
-pub const CELL_WHITE: u8 = 0x0;
-pub const CELL_GREY: u8 = 0x1;
-pub const CELL_BLACK: u8 = 0x2;
+pub const CELL_WHITE_A: u8 = 1;
+pub const CELL_WHITE_B: u8 = 1 << 1;
+pub const CELL_GREY: u8 = 0;
+pub const CELL_BLACK: u8 = 1 << 2;
+pub const CELL_WHITES: u8 = CELL_WHITE_A | CELL_WHITE_B;
 
 pub enum Return {
     Value(Value),
@@ -85,7 +87,7 @@ impl Cell {
             prototype: Some(prototype),
             attributes: TaggedPointer::null(),
             generation: 0,
-            color: CELL_WHITE,
+            color: CELL_WHITE_A,
             forward: crate::util::mem::Address::null(),
         }
     }
@@ -96,7 +98,7 @@ impl Cell {
             prototype: None,
             attributes: TaggedPointer::null(),
             generation: 0,
-            color: CELL_WHITE,
+            color: CELL_WHITE_A,
             forward: crate::util::mem::Address::null(),
         }
     }
@@ -292,6 +294,19 @@ impl CellPointer {
 
     pub fn get_color(&self) -> u8 {
         self.get().color
+    }
+
+    fn is_color(&self, color: u8) -> bool {
+        let c = self.get().color;
+        if color == CELL_BLACK {
+            return (c & CELL_BLACK) != 0;
+        } else if color == CELL_GREY {
+            return c == CELL_GREY;
+        } else if color == CELL_WHITES || color == CELL_WHITE_A || color == CELL_WHITE_B {
+            return (c & CELL_WHITES) != 0;
+        } else {
+            c == color
+        }
     }
 
     pub fn set_color(&self, mut color: u8) -> u8 {

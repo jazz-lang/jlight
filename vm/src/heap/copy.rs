@@ -177,13 +177,17 @@ impl GC {
         if heap.needs_gc == GCType::None {
             heap.needs_gc = GCType::Young;
         }
-
         self.gc_ty = heap.needs_gc;
         let space = if self.gc_ty == GCType::Young {
             heap.new_space.page_size
         } else {
             heap.old_space.page_size
         };
+        log::trace!(
+            "Begin {:?} space collection (current worker is '{}')",
+            self.gc_ty,
+            std::thread::current().name().unwrap()
+        );
         let mut tmp_space = super::space::Space::new(space);
         std::mem::swap(&mut self.tmp_space, &mut tmp_space);
         self.process_grey(heap);
@@ -192,11 +196,12 @@ impl GC {
             debug_assert!(cell.get_color() != CELL_GREY);
             if in_current_space {
                 if cell.get_color() == CELL_BLACK || cell.is_soft_marked() {
-                    if cell.get_color() != CELL_WHITE {
-                        cell.set_color(CELL_WHITE);
+                    if cell.get_color() != CELL_WHITE_A {
+                        cell.set_color(CELL_WHITE_A);
                     }
                     return true;
                 } else {
+                    log::trace!("Finalize {:p}", cell.raw.raw);
                     unsafe {
                         std::ptr::drop_in_place(cell.raw.raw);
                     }
@@ -207,7 +212,7 @@ impl GC {
             }
         });
         while let Some(item) = self.black_items.pop_back() {
-            item.value.set_color(CELL_WHITE);
+            item.value.set_color(CELL_WHITE_A);
             item.value.soft_mark(false);
         }
         std::mem::swap(&mut self.tmp_space, &mut tmp_space);
@@ -218,8 +223,10 @@ impl GC {
         };
         space.swap(&mut tmp_space);
         if self.gc_ty != GCType::Young || heap.needs_gc == GCType::Young {
-            heap.needs_gc = GCType::Young;
+            heap.needs_gc = GCType::None;
+            log::trace!("Collection finished");
         } else {
+            log::trace!("Young space collected, collecting Old space");
             // Do GC for old space.
             self.collect_garbage(heap);
         }
@@ -243,13 +250,13 @@ impl GC {
                 "Process {:p} (color is {})",
                 value.value.raw.raw,
                 match value.value.get_color() {
-                    CELL_WHITE => "white",
+                    CELL_WHITE_A => "white",
                     CELL_BLACK => "black",
                     CELL_GREY => "grey",
                     _ => unreachable!(),
                 }
             );
-            if value.value.get_color() == CELL_WHITE {
+            if value.value.get_color() == CELL_WHITE_A {
                 if !self.is_in_current_space(&value.value) {
                     log::trace!(
                         "{:p} is not in {:?} space (generation: {})",
@@ -306,10 +313,7 @@ impl GC {
 
     pub fn is_in_current_space(&self, value: &CellPointer) -> bool {
         if value.is_permanent() {
-            log::trace!(
-                "Found permanent object '{}', will skip it",
-                value.to_string()
-            );
+            log::trace!("Found permanent object {:p}, will skip it", value.raw.raw);
             return false; // we don't want to move permanent objects
         }
         if self.gc_ty == GCType::Old {
@@ -327,6 +331,12 @@ pub struct GenerationalCopyGC {
     pub threshold: usize,
 }
 
+// after collection we want the the ratio of used/total to be no
+// greater than this (the threshold grows exponentially, to avoid
+// quadratic behavior when the heap is growing linearly with the
+// number of `new` calls):
+const USED_SPACE_RATIO: f64 = 0.7;
+
 impl HeapTrait for GenerationalCopyGC {
     fn should_collect(&self) -> bool {
         self.heap.needs_gc == GCType::Young || self.heap.new_space.size >= self.threshold
@@ -341,6 +351,10 @@ impl HeapTrait for GenerationalCopyGC {
             self.heap.needs_gc = GCType::Young;
         }
         self.gc.collect_garbage(&mut self.heap);
+        if (self.threshold as f64) < self.heap.new_space.allocated_size as f64 * USED_SPACE_RATIO {
+            self.threshold =
+                (self.heap.new_space.allocated_size as f64 / USED_SPACE_RATIO) as usize;
+        }
     }
 
     fn copy_object(&mut self, value: Value) -> Value {
