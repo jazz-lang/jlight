@@ -1,10 +1,14 @@
-pub mod copy;
+pub mod freelist;
+pub mod freelist_alloc;
 pub mod gc_pool;
-pub mod space;
+pub mod incremental;
+pub mod semispace;
 use crate::runtime::cell::*;
 use crate::runtime::config::*;
 use crate::runtime::value::*;
 use crate::util::arc::*;
+pub mod space;
+use space::*;
 #[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
 pub enum GCType {
     None,
@@ -12,21 +16,55 @@ pub enum GCType {
     Old,
 }
 
-#[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
+use structopt::StructOpt;
+
+#[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash, StructOpt)]
+#[structopt(name = "GC Variant", help = "GC type to use for garbage collection")]
 pub enum GCVariant {
+    #[structopt(name = "semispace", help = "Semisapce generational GC")]
     GenerationalSemispace,
+    #[structopt(name = "mark-compact", help = "Mark-Compact GC")]
     MarkCompact,
+    #[structopt(name = "mark-sweep", help = "Mark&Sweep GC")]
     MarkAndSweep,
+    #[structopt(name = "inc-mark-sweep", help = "Incremental Mark&Sweep GC")]
     IncrementalMarkCompact,
+    IncrementalMarkSweep,
+    GenIncMarkSweep,
+}
+
+impl std::str::FromStr for GCVariant {
+    type Err = String;
+    fn from_str(s: &str) -> Result<GCVariant, Self::Err> {
+        let s = s.to_lowercase();
+        let s_: &str = &s;
+        Ok(match s_ {
+            "semispace" => Self::GenerationalSemispace,
+            "mark-compact" | "mark compact" => Self::MarkCompact,
+            "mark-sweep" | "mark and sweep" | "mark&sweep" => Self::MarkAndSweep,
+            "incremental mark-sweep" | "incremental-mark-sweep" => Self::IncrementalMarkSweep,
+            "generational mark-sweep" => Self::GenIncMarkSweep,
+            _ => return Err(format!("Unknown GC Type '{}'", s)),
+        })
+    }
 }
 
 pub fn initialize_process_heap(variant: GCVariant, config: &Config) -> Box<dyn HeapTrait> {
     match variant {
-        GCVariant::GenerationalSemispace => Box::new(copy::GenerationalCopyGC {
-            heap: copy::Heap::new(config.young_size, config.old_size),
-            gc: copy::GC::new(),
-            threshold: config.gc_threshold,
+        GCVariant::GenerationalSemispace => Box::new(semispace::GenerationalCopyGC {
+            heap: semispace::Heap::new(config.young_size, config.old_size),
+            gc: semispace::GC::new(),
+            threshold: config.young_threshold,
+            mature_threshold: config.mature_threshold,
         }),
+        GCVariant::IncrementalMarkSweep => Box::new(incremental::IncrementalCollector::new(
+            false,
+            config.heap_size,
+        )),
+        GCVariant::GenIncMarkSweep => Box::new(incremental::IncrementalCollector::new(
+            true,
+            config.heap_size,
+        )),
 
         _ => unimplemented!(),
     }
@@ -36,13 +74,13 @@ pub fn initialize_process_heap(variant: GCVariant, config: &Config) -> Box<dyn H
 ///
 /// Values that will not be collected and *must* be alive through entire program live should be allocated in perm heap.
 pub struct PermanentHeap {
-    pub space: space::Space,
+    pub space: Space,
 }
 
 impl PermanentHeap {
     pub fn new(perm_size: usize) -> Self {
         Self {
-            space: space::Space::new(perm_size),
+            space: Space::new(perm_size),
         }
     }
     pub fn allocate_empty(&mut self) -> Value {
@@ -71,12 +109,38 @@ impl Drop for PermanentHeap {
 }
 
 pub trait HeapTrait {
+    /// Returns true if GC should be triggered.
     fn should_collect(&self) -> bool;
+    /// Allocate CellPointer
     fn allocate(&mut self, tenure: GCType, cell: Cell) -> CellPointer;
+    /// Copy object from one heap to another heap.
     fn copy_object(&mut self, value: Value) -> Value;
+    /// Collect garbage.
     fn collect_garbage(&mut self);
+    /// Minor GC cycle.
+    ///
+    /// If incremental algorithm is used this should trigger incremental mark&sweep.
+    fn minor_collect(&mut self) {
+        self.collect_garbage();
+    }
+    /// Major GC cycle.
+    fn major_collect(&mut self) {
+        self.collect_garbage();
+    }
+    /// Clear memory.
     fn clear(&mut self) {}
+    /// "Schedule" pointer into GC mark list.
     fn schedule(&mut self, _: *mut CellPointer);
-    fn write_barrier(&mut self, _: CellPointer, _: Value) {}
+    fn write_barrier(&mut self, _: CellPointer) {}
+    /// Colours 'parent' as gray object if child is white and parent is black objects.
+    fn field_write_barrier(&mut self, _: CellPointer, _: Value) {}
+    /// TODO: Do we actually need read barriers? GC is always stop-the-world.
     fn read_barrier(&mut self, _: Value) {}
+    /// Remember object so this object will not be collected even if it's not reachable.
+    fn remember(&mut self, _: CellPointer) {}
+    /// Unremember object so this object may be collected.
+    fn unremember(&mut self, _: CellPointer) {}
+
+    fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>);
+    fn set_proc(&mut self, _proc: Arc<crate::runtime::process::Process>) {}
 }

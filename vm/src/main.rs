@@ -3,16 +3,13 @@ use instruction::*;
 use module::*;
 use process::*;
 use value::*;
-use vm::bytecode::*;
-use vm::runtime::*;
-use vm::util::arc::Arc;
+use waffle::bytecode::*;
+use waffle::runtime::*;
+use waffle::util::arc::Arc;
 fn main() {
     simple_logger::init().unwrap();
     let mut m = Arc::new(Module::new("Main"));
-    let code = basicblock::BasicBlock::new(
-        vec![Instruction::LoadInt(0, 42), Instruction::Return(Some(0))],
-        0,
-    );
+    let code = basicblock::BasicBlock::new(vec![Instruction::Return(None)], 0);
     let func = Function {
         upvalues: vec![],
         name: Arc::new("main".to_owned()),
@@ -29,8 +26,6 @@ fn main() {
     RUNTIME.start_pools();
 
     println!("{}", proc.is_terminated());
-
-    proc.do_gc();
     m.globals.pop();
     proc.do_gc();
 }

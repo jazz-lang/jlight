@@ -1,7 +1,7 @@
 [package]
-name = "vm"
-version = "0.1.0"
-authors = ["gtash <adel.prokurov@protonmail.com>"]
+name = "waffle"
+version = "0.0.1"
+authors = ["Adel Prokurov <adel.prokurov@protonmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -23,6 +23,7 @@ rand = "0.7"
 simple_logger = "1.5"
 const-if = "0.1.3"
 log = "0.4"
+structopt = "0.3"
 num_cpus = "*"
 [target.'cfg(target_family = "windows")'.dependencies]
 winapi = { version = "0.3", features = ["winuser","memoryapi","errhandlingapi","processthreadsapi","synchapi","sysinfoapi"] }

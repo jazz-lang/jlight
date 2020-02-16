@@ -101,11 +101,14 @@ impl Process {
             thread_id: None,
         };
         assert!(local_data.context.raw.is_null() == false);
-        Arc::new(Self {
+        let proc = Arc::new(Self {
             waiting_for_message: AtomicBool::new(false),
             suspended: TaggedPointer::null(),
             local_data: Ptr::new(local_data),
-        })
+        });
+
+        proc.local_data_mut().heap.set_proc(proc.clone());
+        proc
     }
 
     pub fn from_function(
@@ -353,7 +356,7 @@ impl Process {
     }
 
     pub fn do_gc(&self) {
-        let channel = self.local_data().channel.lock();
+        /*let channel = self.local_data().channel.lock();
         channel.trace(|pointer| {
             self.local_data_mut().heap.schedule(pointer as *mut _);
         });
@@ -362,7 +365,7 @@ impl Process {
                 .heap
                 .schedule(pointer as *mut CellPointer);
         });
-
+        */
         let local_data = self.local_data_mut();
         local_data.heap.collect_garbage();
     }

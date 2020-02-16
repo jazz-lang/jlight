@@ -76,7 +76,7 @@ impl State {
         let gc_workers = if let Some(c) = config.gc_workers {
             c
         } else {
-            nof_parallel_worker_threads(5, 8, 8)
+            nof_parallel_worker_threads(5, 8, 8) / 2
         };
         let gc_pool = GcPool::new(gc_workers);
 

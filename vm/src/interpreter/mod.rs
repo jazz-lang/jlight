@@ -221,7 +221,10 @@ impl Runtime {
                     let value = context.stack.pop().unwrap_or(Value::from(VTag::Undefined));
                     context.set_register(r, value);
                 }
-                Instruction::Branch(block) => bindex = block as usize,
+                Instruction::Branch(block) => {
+                    bindex = block as usize;
+                    index = 0
+                }
                 Instruction::ConditionalBranch(r, if_true, if_false) => {
                     let value = context.get_register(r);
                     if value.to_boolean() {
@@ -229,6 +232,7 @@ impl Runtime {
                     } else {
                         bindex = if_false as _;
                     }
+                    index = 0;
                 }
                 Instruction::MakeEnv(function, count) => {
                     let mut upvalues = vec![];
@@ -544,6 +548,7 @@ impl Runtime {
                         enter_context!(process, context, index, bindex);
                     }
                 }
+
                 _ => unimplemented!(),
             }
         };
@@ -576,7 +581,9 @@ impl Runtime {
         proc.set_main();
         self.state.scheduler.schedule_on_main_thread(proc);
     }
-
+    pub fn schedule(&self, proc: Arc<Process>) {
+        self.state.scheduler.schedule(proc);
+    }
     pub fn throw(&self, process: &Arc<Process>, value: Value) -> Result<Value, Value> {
         if let Some(table) = process.local_data_mut().catch_tables.pop() {
             let mut catch_ctx = table.context.replace(Context::new());

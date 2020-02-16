@@ -48,7 +48,12 @@ impl Space {
     pub fn compute_size_limit(&mut self) {
         self.size_limit = self.size << 1;
     }
-
+    pub fn may_allocate_in_current(&mut self, size: usize) -> bool {
+        let even_bytes = size + (size & 0x01);
+        let place_in_current = self.top.deref().offset(even_bytes) <= self.limit.deref();
+        println!("MMM: {}", place_in_current);
+        place_in_current
+    }
     pub fn add_page(&mut self, size: usize) {
         let real_size = align_usize(size, page_size());
         let page = Page::new(real_size);
@@ -77,9 +82,6 @@ impl Space {
             }
 
             if head.is_none() {
-                if self.size > self.size_limit {
-                    *needs_gc = true;
-                }
                 self.add_page(even_bytes);
             }
         }

@@ -1,28 +1,39 @@
-use super::space::*;
+//! Generational copying garbage collector.
+//!
+//! The heap is divided into two spaces: one for old objects and second one is for young objects.
+//! Young heap is larger than old heap because most objects should die young.
+//!
+//! This GC moves object to old heap when object generation is bigger than 5th gen.
+
+use super::Space;
 use super::*;
 use crate::runtime::cell::*;
 use crate::runtime::value::*;
 use crate::util::arc::*;
 use crate::util::mem::*;
+use fxhash::FxBuildHasher;
 use std::boxed::Box;
+use std::collections::HashSet;
 pub struct Heap {
-    pub new_space: space::Space,
-    pub old_space: space::Space,
+    pub new_space: Space,
+    pub old_space: Space,
     pub needs_gc: GCType,
     /// We keep track of all allocated objects so we can properly deallocate them at GC cycle or when this heap is destroed.
     pub allocated: Vec<CellPointer>,
+    pub remembered: HashSet<usize, FxBuildHasher>,
 }
 
 impl Heap {
     pub fn new(young_page_size: usize, old_page_size: usize) -> Self {
         Self {
-            new_space: space::Space::new(young_page_size),
-            old_space: space::Space::new(old_page_size),
+            new_space: Space::new(young_page_size),
+            old_space: Space::new(old_page_size),
             needs_gc: GCType::None,
             allocated: Vec::new(),
+            remembered: HashSet::with_capacity_and_hasher(32, FxBuildHasher::default()),
         }
     }
-
+    /// Copy object from another heap to 'self' heap.
     pub fn copy_object(&mut self, object: Value) -> Value {
         if !object.is_cell() {
             return object;
@@ -129,7 +140,6 @@ impl Drop for Heap {
     }
 }
 
-use crate::util::ptr::*;
 use crate::util::tagged::*;
 use intrusive_collections::{LinkedList, LinkedListLink};
 pub struct GCValue {
@@ -159,14 +169,14 @@ intrusive_adapter!(
 pub struct GC {
     grey_items: LinkedList<GCValueAdapter>,
     black_items: LinkedList<GCValueAdapter>,
-    tmp_space: space::Space,
+    tmp_space: Space,
     gc_ty: GCType,
 }
 
 impl GC {
     pub fn new() -> Self {
         Self {
-            tmp_space: space::Space::empty(),
+            tmp_space: Space::empty(),
             grey_items: LinkedList::new(GCValueAdapter::new()),
             black_items: LinkedList::new(GCValueAdapter::new()),
             gc_ty: GCType::None,
@@ -183,12 +193,18 @@ impl GC {
         } else {
             heap.old_space.page_size
         };
+        heap.remembered.iter().for_each(|remembered| {
+            let cell = CellPointer {
+                raw: TaggedPointer::new(*remembered as *mut Cell),
+            };
+            cell.set_color(CELL_GREY);
+        });
         log::trace!(
             "Begin {:?} space collection (current worker is '{}')",
             self.gc_ty,
             std::thread::current().name().unwrap()
         );
-        let mut tmp_space = super::space::Space::new(space);
+        let mut tmp_space = Space::new(space);
         std::mem::swap(&mut self.tmp_space, &mut tmp_space);
         self.process_grey(heap);
         heap.allocated.retain(|cell| {
@@ -203,7 +219,7 @@ impl GC {
                 } else {
                     log::trace!("Finalize {:p}", cell.raw.raw);
                     unsafe {
-                        std::ptr::drop_in_place(cell.raw.raw);
+                        std::ptr::drop_in_place(cell.raw.raw); // TODO: Better finalization
                     }
                     false
                 }
@@ -222,13 +238,26 @@ impl GC {
             &mut heap.old_space
         };
         space.swap(&mut tmp_space);
+
         if self.gc_ty != GCType::Young || heap.needs_gc == GCType::Young {
             heap.needs_gc = GCType::None;
             log::trace!("Collection finished");
+            heap.remembered.iter().for_each(|remembered| {
+                let cell = CellPointer {
+                    raw: TaggedPointer::new(*remembered as *mut Cell),
+                };
+                cell.set_color(CELL_WHITE_A);
+            });
         } else {
             log::trace!("Young space collected, collecting Old space");
             // Do GC for old space.
             self.collect_garbage(heap);
+            heap.remembered.iter().for_each(|remembered| {
+                let cell = CellPointer {
+                    raw: TaggedPointer::new(*remembered as *mut Cell),
+                };
+                cell.set_color(CELL_WHITE_A);
+            });
         }
     }
 
@@ -280,15 +309,21 @@ impl GC {
                 }
                 let hvalue;
                 if self.gc_ty == GCType::Young {
-                    hvalue =
-                        value
-                            .value
-                            .copy_to(&mut heap.old_space, &mut self.tmp_space, &mut false);
+                    let mut gc = false;
+                    hvalue = value
+                        .value
+                        .copy_to(&mut heap.old_space, &mut self.tmp_space, &mut gc);
+                    if gc {
+                        heap.needs_gc = GCType::Old;
+                    }
                 } else {
-                    hvalue =
-                        value
-                            .value
-                            .copy_to(&mut self.tmp_space, &mut heap.new_space, &mut false);
+                    let mut gc = false;
+                    hvalue = value
+                        .value
+                        .copy_to(&mut self.tmp_space, &mut heap.new_space, &mut gc);
+                    if gc {
+                        heap.needs_gc = GCType::Young;
+                    }
                 }
                 log::trace!("Copy {:p}->{:p}", value.value.raw.raw, hvalue.raw.raw);
                 value.relocate(hvalue);
@@ -329,6 +364,7 @@ pub struct GenerationalCopyGC {
     pub heap: Heap,
     pub gc: GC,
     pub threshold: usize,
+    pub mature_threshold: usize,
 }
 
 // after collection we want the the ratio of used/total to be no
@@ -338,8 +374,21 @@ pub struct GenerationalCopyGC {
 const USED_SPACE_RATIO: f64 = 0.7;
 
 impl HeapTrait for GenerationalCopyGC {
+    fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>) {
+        let channel = proc.local_data().channel.lock();
+        channel.trace(|pointer| {
+            proc.local_data_mut().heap.schedule(pointer as *mut _);
+        });
+        proc.trace(|pointer| {
+            proc.local_data_mut()
+                .heap
+                .schedule(pointer as *mut CellPointer);
+        });
+    }
     fn should_collect(&self) -> bool {
-        self.heap.needs_gc == GCType::Young || self.heap.new_space.size >= self.threshold
+        self.heap.needs_gc == GCType::Young
+            || self.heap.new_space.size >= self.threshold
+            || self.heap.old_space.size >= self.mature_threshold
     }
 
     fn allocate(&mut self, tenure: GCType, cell: Cell) -> CellPointer {
@@ -347,8 +396,10 @@ impl HeapTrait for GenerationalCopyGC {
     }
 
     fn collect_garbage(&mut self) {
-        if self.heap.needs_gc != GCType::Young {
+        if self.heap.new_space.size >= self.threshold {
             self.heap.needs_gc = GCType::Young;
+        } else if self.heap.old_space.size >= self.mature_threshold {
+            self.heap.needs_gc = GCType::Old;
         }
         self.gc.collect_garbage(&mut self.heap);
         if (self.threshold as f64) < self.heap.new_space.allocated_size as f64 * USED_SPACE_RATIO {
@@ -356,7 +407,6 @@ impl HeapTrait for GenerationalCopyGC {
                 (self.heap.new_space.allocated_size as f64 / USED_SPACE_RATIO) as usize;
         }
     }
-
     fn copy_object(&mut self, value: Value) -> Value {
         self.heap.copy_object(value)
     }
@@ -372,5 +422,13 @@ impl HeapTrait for GenerationalCopyGC {
             slot: ptr,
             link: LinkedListLink::new(),
         }));
+    }
+
+    fn remember(&mut self, cell_ptr: CellPointer) {
+        self.heap.remembered.insert(cell_ptr.raw.raw as usize);
+    }
+
+    fn unremember(&mut self, cell_ptr: CellPointer) {
+        self.heap.remembered.remove(&(cell_ptr.raw.raw as usize));
     }
 }
