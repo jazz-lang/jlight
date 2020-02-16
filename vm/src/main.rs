@@ -9,7 +9,7 @@ use waffle::util::arc::Arc;
 fn main() {
     simple_logger::init().unwrap();
     let mut m = Arc::new(Module::new("Main"));
-    let code = basicblock::BasicBlock::new(vec![Instruction::Return(None)], 0);
+    let code = basicblock::BasicBlock::new(vec![Instruction::Gc, Instruction::Return(None)], 0);
     let func = Function {
         upvalues: vec![],
         name: Arc::new("main".to_owned()),

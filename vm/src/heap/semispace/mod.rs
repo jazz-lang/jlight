@@ -207,7 +207,38 @@ impl GC {
         let mut tmp_space = Space::new(space);
         std::mem::swap(&mut self.tmp_space, &mut tmp_space);
         self.process_grey(heap);
-        heap.allocated.retain(|cell| {
+        let space = if self.gc_ty == GCType::Young {
+            &mut heap.new_space
+        } else {
+            &mut heap.old_space
+        };
+        for page in space.pages.iter() {
+            let end = page.top;
+
+            log::trace!(
+                "Sweeping memory page from {:p} to {:p} (memory page limit is {:p})",
+                page.data.to_ptr::<u8>(),
+                page.top.to_ptr::<u8>(),
+                page.limit.to_ptr::<u8>()
+            );
+            let mut scan = page.data;
+
+            while scan < end {
+                let cell_ptr = scan.to_mut_ptr::<Cell>();
+                let cell = CellPointer {
+                    raw: crate::util::tagged::TaggedPointer::new(cell_ptr),
+                };
+                if (cell.get().color & CELL_WHITES) != 0 {
+                    log::trace!("Sweep {:p} '{}'", cell_ptr, cell);
+                    unsafe {
+                        std::ptr::drop_in_place(cell_ptr);
+                    }
+                    cell.get_mut().generation = 127;
+                }
+                scan = scan.offset(std::mem::size_of::<Cell>());
+            }
+        }
+        /*heap.allocated.retain(|cell| {
             let in_current_space = self.is_in_current_space(cell);
             debug_assert!(cell.get_color() != CELL_GREY);
             if in_current_space {
@@ -226,7 +257,7 @@ impl GC {
             } else {
                 true
             }
-        });
+        });*/
         while let Some(item) = self.black_items.pop_back() {
             item.value.set_color(CELL_WHITE_A);
             item.value.soft_mark(false);
@@ -374,7 +405,7 @@ pub struct GenerationalCopyGC {
 const USED_SPACE_RATIO: f64 = 0.7;
 
 impl HeapTrait for GenerationalCopyGC {
-    fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>) {
+    /*fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>) {
         let channel = proc.local_data().channel.lock();
         channel.trace(|pointer| {
             proc.local_data_mut().heap.schedule(pointer as *mut _);
@@ -384,7 +415,7 @@ impl HeapTrait for GenerationalCopyGC {
                 .heap
                 .schedule(pointer as *mut CellPointer);
         });
-    }
+    }*/
     fn should_collect(&self) -> bool {
         self.heap.needs_gc == GCType::Young
             || self.heap.new_space.size >= self.threshold
@@ -392,7 +423,8 @@ impl HeapTrait for GenerationalCopyGC {
     }
 
     fn allocate(&mut self, tenure: GCType, cell: Cell) -> CellPointer {
-        self.heap.allocate(tenure, cell)
+        let cell = self.heap.allocate(tenure, cell);
+        cell
     }
 
     fn collect_garbage(&mut self) {
@@ -430,5 +462,19 @@ impl HeapTrait for GenerationalCopyGC {
 
     fn unremember(&mut self, cell_ptr: CellPointer) {
         self.heap.remembered.remove(&(cell_ptr.raw.raw as usize));
+    }
+
+    fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>) {
+        let channel = proc.local_data().channel.lock();
+        channel.trace(|pointer| {
+            proc.local_data_mut()
+                .heap
+                .schedule(pointer as *mut CellPointer);
+        });
+        proc.trace(|pointer| {
+            proc.local_data_mut()
+                .heap
+                .schedule(pointer as *mut CellPointer);
+        });
     }
 }

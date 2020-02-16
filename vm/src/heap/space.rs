@@ -51,7 +51,6 @@ impl Space {
     pub fn may_allocate_in_current(&mut self, size: usize) -> bool {
         let even_bytes = size + (size & 0x01);
         let place_in_current = self.top.deref().offset(even_bytes) <= self.limit.deref();
-        println!("MMM: {}", place_in_current);
         place_in_current
     }
     pub fn add_page(&mut self, size: usize) {

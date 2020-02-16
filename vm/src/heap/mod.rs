@@ -8,6 +8,7 @@ use crate::runtime::config::*;
 use crate::runtime::value::*;
 use crate::util::arc::*;
 pub mod space;
+use crate::util::mem::{align_usize, page_size};
 use space::*;
 #[derive(Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Debug, Hash)]
 pub enum GCType {
@@ -52,18 +53,21 @@ impl std::str::FromStr for GCVariant {
 pub fn initialize_process_heap(variant: GCVariant, config: &Config) -> Box<dyn HeapTrait> {
     match variant {
         GCVariant::GenerationalSemispace => Box::new(semispace::GenerationalCopyGC {
-            heap: semispace::Heap::new(config.young_size, config.old_size),
+            heap: semispace::Heap::new(
+                align_usize(config.young_size, page_size()),
+                align_usize(config.old_size, page_size()),
+            ),
             gc: semispace::GC::new(),
             threshold: config.young_threshold,
             mature_threshold: config.mature_threshold,
         }),
         GCVariant::IncrementalMarkSweep => Box::new(incremental::IncrementalCollector::new(
             false,
-            config.heap_size,
+            align_usize(config.heap_size, page_size()),
         )),
         GCVariant::GenIncMarkSweep => Box::new(incremental::IncrementalCollector::new(
             true,
-            config.heap_size,
+            align_usize(config.heap_size, page_size()),
         )),
 
         _ => unimplemented!(),

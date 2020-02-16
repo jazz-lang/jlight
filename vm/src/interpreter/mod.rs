@@ -424,7 +424,14 @@ impl Runtime {
                         enter_context!(process, context, index, bindex);
                     }
                 }
-
+                Instruction::Gc => {
+                    context.bindex = bindex;
+                    context.index = index;
+                    self.state
+                        .gc_pool
+                        .schedule(Collection::new(process.clone()));
+                    return Ok(Value::empty());
+                }
                 Instruction::New(dest, function, argc) => {
                     let function = context.get_register(function);
                     if !function.is_cell() {

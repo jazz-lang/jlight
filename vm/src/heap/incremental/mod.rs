@@ -212,6 +212,11 @@ impl IncrementalCollector {
                     if !self.generational {
                         paint_partial_white(self, cell);
                     }
+                    if self.generational {
+                        if cell.get().generation < 5 {
+                            cell.get_mut().generation += 1;
+                        }
+                    }
                 }
 
                 scan = scan.offset(std::mem::size_of::<Cell>());
@@ -257,6 +262,9 @@ impl IncrementalCollector {
     }
 
     fn mark_children(&mut self, obj: CellPointer) -> usize {
+        if obj.raw.is_null() {
+            return 0;
+        }
         paint_black(obj);
         let mut children = 0;
         obj.get().trace(|ptr| {
@@ -271,6 +279,9 @@ impl IncrementalCollector {
         let mut tried_marks = 0;
         while !self.grey.is_empty() && tried_marks < limit {
             let value = self.grey.pop_front().unwrap();
+            if value.raw.is_null() {
+                continue;
+            }
             log::trace!("Incremental mark {:p}", value.raw.raw);
             tried_marks += self.mark_children(value);
         }
@@ -369,15 +380,18 @@ impl HeapTrait for IncrementalCollector {
         if let None = self.process {
             self.process = Some(proc.clone());
         }
-        assert!(proc.local_data().channel.try_lock().is_some());
+        debug_assert!(proc.local_data().channel.try_lock().is_some());
         let channel = proc.local_data().channel.lock();
-        channel.trace(|pointer| {
-            proc.local_data_mut().heap.schedule(pointer as *mut _);
+        channel.trace(|pointer| unsafe {
+            self.grey.push_front(*pointer);
         });
         proc.trace(|pointer| {
-            proc.local_data_mut()
-                .heap
-                .schedule(pointer as *mut CellPointer);
+            /*proc.local_data_mut()
+            .heap
+            .schedule(pointer as *mut CellPointer);*/
+            unsafe {
+                self.grey.push_front(*pointer);
+            }
         });
     }
     fn copy_object(&mut self, object: Value) -> Value {
@@ -447,9 +461,9 @@ impl HeapTrait for IncrementalCollector {
 
         Value::from(self.allocate(GCType::Young, copy))
     }
-    fn schedule(&mut self, ptr: *mut CellPointer) {
+    fn schedule(&mut self, _ptr: *mut CellPointer) {
         unsafe {
-            self.roots.push(*ptr);
+            //self.roots.push(*ptr);
         }
     }
     fn allocate(&mut self, _: GCType, cell: Cell) -> CellPointer {
