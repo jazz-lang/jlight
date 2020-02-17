@@ -187,15 +187,55 @@ impl Value {
         }
     }
 
-    pub fn add_attribute(&self, state: &RcState, name: Arc<String>, value: Value) {
+    pub fn add_attribute_without_barrier(&self, state: &RcState, name: Arc<String>, value: Value) {
         if self.is_number() {
-            state.number_prototype.add_attribute(state, name, value);
+            state
+                .number_prototype
+                .add_attribute_without_barrier(state, name, value);
         } else if self.is_bool() {
-            state.boolean_prototype.add_attribute(state, name, value);
+            state
+                .boolean_prototype
+                .add_attribute_without_barrier(state, name, value);
         } else if self.is_null_or_undefined() {
             return;
         } else {
-            self.as_cell().add_attribute(&**state, &name, value);
+            self.as_cell().add_attribute_without_barrier(&name, value);
+        }
+    }
+
+    pub fn add_attribute_barriered(
+        &self,
+        state: &RcState,
+        proc: &Arc<Process>,
+        name: Arc<String>,
+        value: Value,
+    ) {
+        if self.is_number() {
+            if value.is_cell() {
+                if (value.as_cell().get().color & CELL_WHITES) != 0
+                    && !value.as_cell().is_permanent()
+                {
+                    value.as_cell().get_mut().color = CELL_GREY;
+                }
+            }
+            state
+                .number_prototype
+                .add_attribute_without_barrier(state, name, value);
+        } else if self.is_bool() {
+            if value.is_cell() {
+                if (value.as_cell().get().color & CELL_WHITES) != 0
+                    && !value.as_cell().is_permanent()
+                {
+                    value.as_cell().get_mut().color = CELL_GREY;
+                }
+            }
+            state
+                .boolean_prototype
+                .add_attribute_without_barrier(state, name, value);
+        } else if self.is_null_or_undefined() {
+            return;
+        } else {
+            self.as_cell().add_attribute(proc, &name, value);
         }
     }
 

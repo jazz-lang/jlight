@@ -154,22 +154,22 @@ pub fn initialize_process_prototype(state: &RcState) {
     let proc_prototype = state.process_prototype.as_cell();
     let name = Arc::new("spawn".to_owned());
     let spawn = state.allocate_native_fn_with_name(spawn, name.clone(), 1);
-    proc_prototype.add_attribute(state, &name, Value::from(spawn));
+    proc_prototype.add_attribute_without_barrier(&name, Value::from(spawn));
     let name = Arc::new("send".to_owned());
     let send = state.allocate_native_fn_with_name(send, name.clone(), -1);
-    proc_prototype.add_attribute(state, &name, Value::from(send));
+    proc_prototype.add_attribute_without_barrier(&name, Value::from(send));
     let name = Arc::new("receive_message".to_owned());
     let recv = state.allocate_native_fn_with_name(receive, name.clone(), 0);
-    proc_prototype.add_attribute(state, &name, Value::from(recv));
+    proc_prototype.add_attribute_without_barrier(&name, Value::from(recv));
     let name = Arc::new("wait_for_message".to_owned());
     let wait = state.allocate_native_fn_with_name(wait_for_message, name.clone(), -1);
-    proc_prototype.add_attribute(state, &name, Value::from(wait));
+    proc_prototype.add_attribute_without_barrier(&name, Value::from(wait));
     let name = Arc::new("current".to_owned());
     let current = state.allocate_native_fn_with_name(current, name.clone(), 0);
-    proc_prototype.add_attribute(state, &name, Value::from(current));
+    proc_prototype.add_attribute_without_barrier(&name, Value::from(current));
     let name = Arc::new("has_messages".to_owned());
     let has_messages = state.allocate_native_fn_with_name(has_messages, name.clone(), 0);
-    proc_prototype.add_attribute(state, &name, Value::from(has_messages));
+    proc_prototype.add_attribute_without_barrier(&name, Value::from(has_messages));
 }
 
 /// Attempts to reschedule the given process after it was sent a message.

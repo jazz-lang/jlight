@@ -205,7 +205,7 @@ pub trait HeapTrait {
     /// Colours 'parent' as gray object if child is white and parent is black objects.
     fn field_write_barrier(&mut self, _: CellPointer, _: Value) {}
     /// Read barrier is used when background GC is enabled.
-    fn read_barrier(&mut self, _: Value) {}
+    fn read_barrier(&mut self, _: *const CellPointer) {}
     /// Remember object so this object will not be collected even if it's not reachable.
     fn remember(&mut self, _: CellPointer) {}
     /// Unremember object so this object may be collected.

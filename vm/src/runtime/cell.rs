@@ -376,7 +376,12 @@ impl CellPointer {
     }
 
     /// Adds an attribute to the object this pointer points to.
-    pub fn add_attribute(&self, _: &State, name: &Arc<String>, attr: Value) {
+    pub fn add_attribute(&self, proc: &Arc<Process>, name: &Arc<String>, attr: Value) {
+        proc.local_data_mut().heap.field_write_barrier(*self, attr);
+        self.get_mut().add_attribute(name.clone(), attr);
+    }
+
+    pub fn add_attribute_without_barrier(&self, name: &Arc<String>, attr: Value) {
         self.get_mut().add_attribute(name.clone(), attr);
     }
 
@@ -575,11 +580,24 @@ impl fmt::Display for CellPointer {
 }
 
 #[no_mangle]
-pub extern "C" fn cell_add_attribute(cell: *const Cell, key: Value, value: Value) {
+pub extern "C" fn cell_add_attribute_wo_barrier(cell: *const Cell, key: Value, value: Value) {
     let key = key.to_string();
     let key_ptr = Arc::new(key);
     let pointer = CellPointer::from(cell);
-    pointer.add_attribute(&*RUNTIME.state, &key_ptr, value);
+    pointer.add_attribute_without_barrier(&key_ptr, value);
+}
+
+pub extern "C" fn cell_add_attribute_barriered(
+    proc: *const Process,
+    cell: *const Cell,
+    key: Value,
+    value: Value,
+) {
+    let proc = unsafe { Arc::from_raw(proc as *mut Process) };
+    let key = key.to_string();
+    let key_ptr = Arc::new(key);
+    let pointer = CellPointer::from(cell);
+    pointer.add_attribute(&proc, &key_ptr, value);
 }
 
 #[no_mangle]

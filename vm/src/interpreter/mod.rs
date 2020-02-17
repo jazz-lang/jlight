@@ -190,7 +190,7 @@ impl Runtime {
                     let object = context.get_register(object);
                     let value = context.get_register(value);
 
-                    object.add_attribute(&self.state, id, value);
+                    object.add_attribute_barriered(&self.state, &process, id, value);
                 }
                 Instruction::StoreByValue(object, key, value) => {
                     let object = context.get_register(object);
@@ -205,13 +205,17 @@ impl Runtime {
                                         array.push(Value::from(VTag::Undefined))
                                     }
                                 }
+                                process
+                                    .local_data_mut()
+                                    .heap
+                                    .write_barrier(object.as_cell());
                                 array[idx] = value;
                                 continue;
                             }
                         }
                     }
                     let id = Arc::new(key.to_string());
-                    object.add_attribute(&self.state, id, value);
+                    object.add_attribute_barriered(&self.state, &process, id, value);
                 }
                 Instruction::Push(r) => {
                     let value = context.get_register(r);
