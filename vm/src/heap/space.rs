@@ -62,6 +62,23 @@ impl Space {
         self.pages.push_back(Box::new(page));
     }
 
+    pub fn fast_allocate(&mut self, bytes: usize, needs_gc: &mut bool) -> Address {
+        let even_bytes = bytes + (bytes & 0x01);
+        let place_in_current = self.top.deref().offset(even_bytes) <= self.limit.deref();
+
+        if !place_in_current {
+            *needs_gc = true;
+            self.add_page(even_bytes);
+        }
+        self.allocated_size += even_bytes;
+        let result = self.top.deref();
+        unsafe {
+            *self.top.to_mut_ptr::<*mut u8>() =
+                self.top.deref().offset(even_bytes).to_mut_ptr::<u8>();
+        }
+        result
+    }
+
     pub fn allocate(&mut self, bytes: usize, needs_gc: &mut bool) -> Address {
         let even_bytes = bytes + (bytes & 0x01);
         let place_in_current = self.top.deref().offset(even_bytes) <= self.limit.deref();
@@ -81,6 +98,7 @@ impl Space {
             }
 
             if head.is_none() {
+                *needs_gc = true;
                 self.add_page(even_bytes);
             }
         }

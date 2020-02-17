@@ -169,26 +169,6 @@ impl GC {
                 scan = scan.offset(std::mem::size_of::<Cell>());
             }
         }
-        /*heap.allocated.retain(|cell| {
-            let in_current_space = self.is_in_current_space(cell);
-            debug_assert!(cell.get_color() != CELL_GREY);
-            if in_current_space {
-                if cell.get_color() == CELL_BLACK || cell.is_soft_marked() {
-                    if cell.get_color() != CELL_WHITE_A {
-                        cell.set_color(CELL_WHITE_A);
-                    }
-                    return true;
-                } else {
-                    log::trace!("Finalize {:p}", cell.raw.raw);
-                    unsafe {
-                        std::ptr::drop_in_place(cell.raw.raw); // TODO: Better finalization
-                    }
-                    false
-                }
-            } else {
-                true
-            }
-        });*/
         while let Some(item) = self.black_items.pop_back() {
             item.value.set_color(CELL_WHITE_A);
             item.value.soft_mark(false);
@@ -336,21 +316,11 @@ pub struct GenerationalCopyGC {
 const USED_SPACE_RATIO: f64 = 0.7;
 
 impl HeapTrait for GenerationalCopyGC {
-    /*fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>) {
-        let channel = proc.local_data().channel.lock();
-        channel.trace(|pointer| {
-            proc.local_data_mut().heap.schedule(pointer as *mut _);
-        });
-        proc.trace(|pointer| {
-            proc.local_data_mut()
-                .heap
-                .schedule(pointer as *mut CellPointer);
-        });
-    }*/
     fn should_collect(&self) -> bool {
         self.heap.needs_gc == GCType::Young
             || self.heap.new_space.size >= self.threshold
             || self.heap.old_space.size >= self.mature_threshold
+            || self.heap.needs_gc == GCType::Old
     }
 
     fn allocate(&mut self, tenure: GCType, cell: Cell) -> CellPointer {

@@ -59,6 +59,7 @@ pub struct IncrementalCollector {
     remembered: std::collections::HashSet<usize, fxhash::FxBuildHasher>,
     full: bool,
     grey: LinkedList<CellPointer>,
+    atomic_grey: LinkedList<CellPointer>,
     step_ratio: usize,
     state: GcState,
     roots: Vec<CellPointer>,
@@ -243,6 +244,16 @@ impl IncrementalCollector {
                 self.mark_children(value);
             }
         }
+        self.grey.clear();
+        let mut empty = LinkedList::new();
+        std::mem::swap(&mut self.atomic_grey, &mut empty);
+        std::mem::replace(&mut self.grey, empty);
+        while let Some(value) = self.grey.pop_front() {
+            if is_grey(value) {
+                paint_black(value);
+                self.mark_children(value);
+            }
+        }
     }
     fn mark(&mut self, obj: CellPointer) {
         if !is_white(obj) {
@@ -368,6 +379,7 @@ impl IncrementalCollector {
             threshold: 128,
             major_old_threshold: 0,
             process: None,
+            atomic_grey: LinkedList::new(),
         }
     }
 }
@@ -425,11 +437,11 @@ impl HeapTrait for IncrementalCollector {
     fn should_collect(&self) -> bool {
         self.threshold < self.live
     }
-
+    /// Perform a minor incremental GC cycle.
     fn minor_collect(&mut self) {
         self.minor();
     }
-
+    /// Perform a full GC cycle.
     fn major_collect(&mut self) {
         self.major();
     }
@@ -443,6 +455,11 @@ impl HeapTrait for IncrementalCollector {
         if !child.is_cell() {
             return;
         }
+        log::trace!(
+            "Write barrier {:p}->{:p}",
+            parent.raw.raw,
+            child.as_cell().raw.raw
+        );
         let child = child.as_cell();
         if !is_black(parent) {
             return;
@@ -460,13 +477,20 @@ impl HeapTrait for IncrementalCollector {
         }
     }
 
+    /// Write barrier
+    ///   Paint obj(Black) to obj(Gray).
+    ///
+    ///   The object that is painted gray will be traversed atomically in final
+    ///   mark phase. So you use this write barrier if it's frequency written spot.
+    ///   e.g. Set element on Array.
     fn write_barrier(&mut self, obj: CellPointer) {
+        log::trace!("Write barrier {:p}", obj.raw.raw);
         if !is_black(obj) {
             return;
         }
 
         paint_grey(obj);
-        self.grey.push_front(obj);
+        self.atomic_grey.push_front(obj);
     }
 
     fn set_proc(&mut self, proc: Arc<crate::runtime::process::Process>) {
