@@ -58,19 +58,6 @@ impl Collection {
     }
 
     pub fn perform(&self, state: &State) {
-        //self.process.do_gc();
-        /*let channel = self.local_data().channel.lock();
-        channel.trace(|pointer| {
-            self.local_data_mut().heap.schedule(pointer as *mut _);
-        });
-        self.trace(|pointer| {
-            self.local_data_mut()
-                .heap
-                .schedule(pointer as *mut CellPointer);
-        });
-
-        let local_data = self.local_data_mut();
-        local_data.heap.collect_garbage();*/
         let local_data = self.process.local_data_mut();
         local_data.heap.trace_process(&self.process);
         local_data.heap.collect_garbage();

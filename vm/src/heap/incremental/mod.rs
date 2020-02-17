@@ -223,6 +223,7 @@ impl IncrementalCollector {
             }
             add_freelist!(garbage_start, end);
         }
+        self.allocator.freelist = freelist;
         self.live_after_mark -= tried_sweep;
         self.live -= tried_sweep;
         tried_sweep
@@ -243,29 +244,38 @@ impl IncrementalCollector {
             }
         }
     }
-
-    fn add_freelist(&mut self, start: Address, end: Address) {
-        if start.is_null() {
-            return;
-        }
-
-        let size = end.offset_from(start);
-        self.allocator.freelist.add(start, size);
-    }
     fn mark(&mut self, obj: CellPointer) {
         if !is_white(obj) {
             return;
         }
-        log::trace!("Mark {:p}", obj.raw.raw);
-        paint_grey(obj);
-        self.grey.push_front(obj);
+        if !obj.is_permanent() {
+            paint_grey(obj);
+            log::trace!("Mark {:p} '{}'", obj.raw.raw, obj);
+
+            self.grey.push_front(obj);
+        }
+    }
+
+    fn incremental_marking_phase(&mut self, limit: usize) -> usize {
+        let mut tried_marks = 0;
+        while !self.grey.is_empty() && tried_marks < limit {
+            let value = self.grey.pop_front().unwrap();
+            if value.raw.is_null() {
+                continue;
+            }
+            log::trace!("Trace {:p}", value.raw.raw);
+            tried_marks += self.mark_children(value);
+        }
+        tried_marks
     }
 
     fn mark_children(&mut self, obj: CellPointer) -> usize {
         if obj.raw.is_null() {
             return 0;
         }
-        paint_black(obj);
+        if !obj.is_permanent() {
+            paint_black(obj);
+        }
         let mut children = 0;
         obj.get().trace(|ptr| {
             let ptr = unsafe { *ptr };
@@ -274,18 +284,6 @@ impl IncrementalCollector {
         });
 
         children
-    }
-    fn incremental_marking_phase(&mut self, limit: usize) -> usize {
-        let mut tried_marks = 0;
-        while !self.grey.is_empty() && tried_marks < limit {
-            let value = self.grey.pop_front().unwrap();
-            if value.raw.is_null() {
-                continue;
-            }
-            log::trace!("Incremental mark {:p}", value.raw.raw);
-            tried_marks += self.mark_children(value);
-        }
-        tried_marks
     }
     fn clear_all_old(&mut self) {
         if self.is_major() {
@@ -367,7 +365,7 @@ impl IncrementalCollector {
             current_white_part: CELL_WHITE_A,
             remembered: std::collections::HashSet::with_hasher(fxhash::FxBuildHasher::default()),
             state: GcState::Root,
-            threshold: 1024,
+            threshold: 128,
             major_old_threshold: 0,
             process: None,
         }
@@ -378,6 +376,7 @@ use super::*;
 impl HeapTrait for IncrementalCollector {
     fn trace_process(&mut self, proc: &Arc<crate::runtime::process::Process>) {
         if let None = self.process {
+            // We **must** need to have process stored in 'self' because our GC is incremental and we have to scan roots too often.
             self.process = Some(proc.clone());
         }
         debug_assert!(proc.local_data().channel.try_lock().is_some());
@@ -385,86 +384,12 @@ impl HeapTrait for IncrementalCollector {
         channel.trace(|pointer| unsafe {
             self.grey.push_front(*pointer);
         });
-        proc.trace(|pointer| {
-            /*proc.local_data_mut()
-            .heap
-            .schedule(pointer as *mut CellPointer);*/
-            unsafe {
-                self.grey.push_front(*pointer);
-            }
+        proc.trace(|pointer| unsafe {
+            self.grey.push_front(*pointer);
         });
     }
-    fn copy_object(&mut self, object: Value) -> Value {
-        if !object.is_cell() {
-            return object;
-        }
-
-        let to_copy = object.as_cell();
-        if to_copy.is_permanent() {
-            return object;
-        }
-        let to_copy = to_copy.get();
-        let value_copy = match &to_copy.value {
-            CellValue::None => CellValue::None,
-            CellValue::Duration(d) => CellValue::Duration(d.clone()),
-            CellValue::File(_) => panic!("Cannot copy file"),
-            CellValue::Number(x) => CellValue::Number(*x),
-            CellValue::Bool(x) => CellValue::Bool(*x),
-            CellValue::String(x) => CellValue::String(x.clone()),
-            CellValue::Array(values) => {
-                let new_values = values
-                    .iter()
-                    .map(|value| self.copy_object(*value))
-                    .collect();
-                CellValue::Array(new_values)
-            }
-            CellValue::Function(function) => {
-                let name = function.name.clone();
-                let argc = function.argc.clone();
-                let module = function.module.clone();
-                let upvalues = function
-                    .upvalues
-                    .iter()
-                    .map(|x| self.copy_object(*x))
-                    .collect();
-                let native = function.native;
-                let code = function.code.clone();
-                CellValue::Function(Arc::new(Function {
-                    name,
-                    argc,
-                    module,
-                    upvalues,
-                    native,
-                    code,
-                }))
-            }
-            CellValue::ByteArray(array) => CellValue::ByteArray(array.clone()),
-            CellValue::Module(module) => CellValue::Module(module.clone()),
-            CellValue::Process(proc) => CellValue::Process(proc.clone()),
-        };
-        let mut copy = if let Some(proto_ptr) = to_copy.prototype {
-            let proto_copy = self.copy_object(Value::from(proto_ptr));
-            Cell::with_prototype(value_copy, proto_copy.as_cell())
-        } else {
-            Cell::new(value_copy)
-        };
-        if let Some(map) = to_copy.attributes_map() {
-            let mut map_copy = AttributesMap::with_capacity(map.len());
-            for (key, val) in map.iter() {
-                let key_copy = key.clone();
-                let val = self.copy_object(*val);
-                map_copy.insert(key_copy, val);
-            }
-
-            copy.set_attributes_map(map_copy);
-        }
-
-        Value::from(self.allocate(GCType::Young, copy))
-    }
     fn schedule(&mut self, _ptr: *mut CellPointer) {
-        unsafe {
-            //self.roots.push(*ptr);
-        }
+        // do not do anything,we have `trace_process` there.
     }
     fn allocate(&mut self, _: GCType, cell: Cell) -> CellPointer {
         if self.threshold < self.live {

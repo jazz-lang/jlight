@@ -57,9 +57,9 @@ pub enum CellValue {
     None,
     Number(f64),
     Bool(bool),
-    String(String),
-    Array(Vec<Value>),
-    ByteArray(Vec<u8>),
+    String(Arc<String>),
+    Array(Box<Vec<Value>>),
+    ByteArray(Box<Vec<u8>>),
     Function(Arc<Function>),
     Module(Arc<Module>),
     Process(Arc<Process>),
@@ -67,7 +67,6 @@ pub enum CellValue {
     File(File),
 }
 
-pub const MARK_BIT: usize = 0;
 pub struct Cell {
     pub value: CellValue,
     pub prototype: Option<CellPointer>,
@@ -78,6 +77,8 @@ pub struct Cell {
 }
 
 pub type AttributesMap = ahash::AHashMap<Arc<String>, Value>;
+
+pub const MARK_BIT: usize = 0;
 
 impl Cell {
     pub fn with_prototype(value: CellValue, prototype: CellPointer) -> Self {
@@ -488,56 +489,52 @@ impl CellPointer {
     }
 
     pub fn to_string(&self) -> String {
-        if self.is_tagged_number() {
-            unreachable!()
-        } else {
-            match self.get().value {
-                CellValue::String(ref s) => (*s).clone(),
-                CellValue::Array(ref array) => {
+        match self.get().value {
+            CellValue::String(ref s) => (**s).clone(),
+            CellValue::Array(ref array) => {
+                use std::fmt::Write;
+                let mut fmt_buf = String::new();
+                for (i, object) in array.iter().enumerate() {
+                    write!(fmt_buf, "{}", object.to_string()).unwrap();
+                    if i != array.len() - 1 {
+                        write!(fmt_buf, ",").unwrap();
+                    }
+                }
+
+                fmt_buf
+            }
+            CellValue::Duration(d) => format!("Duration({})", d.as_millis()),
+            CellValue::Process(_) => String::from("Process"),
+            CellValue::File(_) => String::from("File"),
+            CellValue::ByteArray(ref array) => format!("ByteArray({:?})", array),
+            CellValue::Function(ref f) => format!(
+                "function {}(...) {{...}}",
+                if f.name.len() != 0 {
+                    (*f.name).clone()
+                } else {
+                    "<anonymous>".to_owned()
+                }
+            ),
+            CellValue::Number(n) => n.to_string(),
+            CellValue::Module(_) => String::from("Module"),
+            CellValue::None => {
+                if self.get().has_attributes() {
                     use std::fmt::Write;
                     let mut fmt_buf = String::new();
-                    for (i, object) in array.iter().enumerate() {
-                        write!(fmt_buf, "{}", object.to_string()).unwrap();
-                        if i != array.len() - 1 {
-                            write!(fmt_buf, ",").unwrap();
-                        }
+                    write!(fmt_buf, "{{\n").unwrap();
+                    for (_, (key, value)) in
+                        self.get().attributes.as_ref().unwrap().iter().enumerate()
+                    {
+                        write!(fmt_buf, "  {}: {}\n", key, value.to_string()).unwrap();
                     }
+                    write!(fmt_buf, "\n}}").unwrap();
 
                     fmt_buf
+                } else {
+                    String::from("{}")
                 }
-                CellValue::Duration(d) => format!("Duration({})", d.as_millis()),
-                CellValue::Process(_) => String::from("Process"),
-                CellValue::File(_) => String::from("File"),
-                CellValue::ByteArray(ref array) => format!("ByteArray({:?})", array),
-                CellValue::Function(ref f) => format!(
-                    "function {}(...) {{...}}",
-                    if f.name.len() != 0 {
-                        (*f.name).clone()
-                    } else {
-                        "<anonymous>".to_owned()
-                    }
-                ),
-                CellValue::Number(n) => n.to_string(),
-                CellValue::Module(_) => String::from("Module"),
-                CellValue::None => {
-                    if self.get().has_attributes() {
-                        use std::fmt::Write;
-                        let mut fmt_buf = String::new();
-                        write!(fmt_buf, "{{\n").unwrap();
-                        for (_, (key, value)) in
-                            self.get().attributes.as_ref().unwrap().iter().enumerate()
-                        {
-                            write!(fmt_buf, "  {}: {}\n", key, value.to_string()).unwrap();
-                        }
-                        write!(fmt_buf, "\n}}").unwrap();
-
-                        fmt_buf
-                    } else {
-                        String::from("{}")
-                    }
-                }
-                CellValue::Bool(x) => x.to_string(),
             }
+            CellValue::Bool(x) => x.to_string(),
         }
     }
 }

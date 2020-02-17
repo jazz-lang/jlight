@@ -15,10 +15,13 @@ impl FreeListAllocator {
     }
 
     pub fn allocate(&mut self, size: usize) -> Address {
+        log::trace!("allocation with size {} requested", size);
         if self.space.may_allocate_in_current(size) {
+            log::trace!("memory for allocation found in current page");
             // if it possible to allocate in current page we should do it
             return self.space.allocate(size, &mut false);
         }
+        log::trace!("no memory in current page, trying to use freelist");
         // We cannot allocate in current page, let's try to find free slot.
         let (free_space, size) = self.freelist.alloc(size);
 
@@ -33,8 +36,10 @@ impl FreeListAllocator {
             if new_free_size != 0 {
                 self.freelist.add(free_start, new_free_size);
             }
+            log::trace!("free list slot found");
             return object;
         }
+        log::trace!("no free slot, allocating new page");
         // Free slot not found, allocate new page and allocate memory in new page.
         self.space.add_page(self.space.page_size);
         self.space.allocate(size, &mut false)

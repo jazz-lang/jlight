@@ -26,7 +26,7 @@ pub struct Config {
     #[structopt(
         long = "heap-size",
         help = "Heap size (default 1024 * 8 * 4)",
-        default_value = "32768"
+        default_value = "16384"
     )]
     pub heap_size: usize,
     #[structopt(

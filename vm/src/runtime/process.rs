@@ -6,13 +6,23 @@ use super::value::*;
 use crate::heap::{initialize_process_heap, GCType, HeapTrait};
 use crate::interpreter::context::*;
 use crate::util;
+
 use parking_lot::Mutex;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use util::arc::*;
 use util::ptr::*;
 use util::tagged;
 use util::tagged::*;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Debug)]
+#[repr(u8)]
+pub enum ProcessPriority {
+    Max,
+    High,
+    Normal,
+    Low,
+}
 
 /// The bit that is set to mark a process as being suspended.
 const SUSPENDED_BIT: usize = 0;
@@ -88,6 +98,7 @@ pub struct Process {
     /// operations and tagging, something which isn't possible using an
     /// `Option<T>`.
     suspended: TaggedPointer<Timeout>,
+    pub priority: AtomicU8,
 }
 
 impl Process {
@@ -105,6 +116,7 @@ impl Process {
             waiting_for_message: AtomicBool::new(false),
             suspended: TaggedPointer::null(),
             local_data: Ptr::new(local_data),
+            priority: AtomicU8::new(ProcessPriority::Normal as u8),
         });
 
         proc.local_data_mut().heap.set_proc(proc.clone());
@@ -356,16 +368,6 @@ impl Process {
     }
 
     pub fn do_gc(&self) {
-        /*let channel = self.local_data().channel.lock();
-        channel.trace(|pointer| {
-            self.local_data_mut().heap.schedule(pointer as *mut _);
-        });
-        self.trace(|pointer| {
-            self.local_data_mut()
-                .heap
-                .schedule(pointer as *mut CellPointer);
-        });
-        */
         let local_data = self.local_data_mut();
         local_data.heap.collect_garbage();
     }
@@ -375,7 +377,7 @@ impl Process {
         let cell = local_data.heap.allocate(
             GCType::Young,
             Cell::with_prototype(
-                CellValue::String(String::from(string)),
+                CellValue::String(Arc::new(String::from(string))),
                 state.string_prototype.as_cell(),
             ),
         );
@@ -398,8 +400,6 @@ impl PartialEq for Arc<Process> {
         self.as_ptr() == other.as_ptr()
     }
 }
-
-use std::sync::atomic::AtomicU8;
 
 /// The status of a process, represented as a set of bits.
 ///

@@ -118,7 +118,73 @@ pub trait HeapTrait {
     /// Allocate CellPointer
     fn allocate(&mut self, tenure: GCType, cell: Cell) -> CellPointer;
     /// Copy object from one heap to another heap.
-    fn copy_object(&mut self, value: Value) -> Value;
+    fn copy_object(&mut self, object: Value) -> Value {
+        if !object.is_cell() {
+            return object;
+        }
+
+        let to_copy = object.as_cell();
+        if to_copy.is_permanent() {
+            return object;
+        }
+        let to_copy = to_copy.get();
+        let value_copy = match &to_copy.value {
+            CellValue::None => CellValue::None,
+            CellValue::Duration(d) => CellValue::Duration(d.clone()),
+            CellValue::File(_) => panic!("Cannot copy file"),
+            CellValue::Number(x) => CellValue::Number(*x),
+            CellValue::Bool(x) => CellValue::Bool(*x),
+            CellValue::String(x) => CellValue::String(x.clone()),
+            CellValue::Array(values) => {
+                let new_values = values
+                    .iter()
+                    .map(|value| self.copy_object(*value))
+                    .collect();
+                CellValue::Array(Box::new(new_values))
+            }
+            CellValue::Function(function) => {
+                let name = function.name.clone();
+                let argc = function.argc.clone();
+                let module = function.module.clone();
+                let upvalues = function
+                    .upvalues
+                    .iter()
+                    .map(|x| self.copy_object(*x))
+                    .collect();
+                let native = function.native;
+                let code = function.code.clone();
+                CellValue::Function(Arc::new(Function {
+                    name,
+                    argc,
+                    module,
+                    upvalues,
+                    native,
+                    code,
+                }))
+            }
+            CellValue::ByteArray(array) => CellValue::ByteArray(array.clone()),
+            CellValue::Module(module) => CellValue::Module(module.clone()),
+            CellValue::Process(proc) => CellValue::Process(proc.clone()),
+        };
+        let mut copy = if let Some(proto_ptr) = to_copy.prototype {
+            let proto_copy = self.copy_object(Value::from(proto_ptr));
+            Cell::with_prototype(value_copy, proto_copy.as_cell())
+        } else {
+            Cell::new(value_copy)
+        };
+        if let Some(map) = to_copy.attributes_map() {
+            let mut map_copy = AttributesMap::with_capacity(map.len());
+            for (key, val) in map.iter() {
+                let key_copy = key.clone();
+                let val = self.copy_object(*val);
+                map_copy.insert(key_copy, val);
+            }
+
+            copy.set_attributes_map(map_copy);
+        }
+
+        Value::from(self.allocate(GCType::Young, copy))
+    }
     /// Collect garbage.
     fn collect_garbage(&mut self);
     /// Minor GC cycle.
@@ -138,7 +204,7 @@ pub trait HeapTrait {
     fn write_barrier(&mut self, _: CellPointer) {}
     /// Colours 'parent' as gray object if child is white and parent is black objects.
     fn field_write_barrier(&mut self, _: CellPointer, _: Value) {}
-    /// TODO: Do we actually need read barriers? GC is always stop-the-world.
+    /// Read barrier is used when background GC is enabled.
     fn read_barrier(&mut self, _: Value) {}
     /// Remember object so this object will not be collected even if it's not reachable.
     fn remember(&mut self, _: CellPointer) {}
