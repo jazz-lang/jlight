@@ -307,6 +307,8 @@ impl IncrementalCollector {
         self.live_after_mark = self.live;
         self.incremental_gc_until(GcState::Root);
         self.generational = tmp;
+        self.grey.clear();
+        self.atomic_grey.clear();
     }
 
     fn major(&mut self) {
