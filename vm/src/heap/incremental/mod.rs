@@ -1,6 +1,10 @@
 //! Incremental mark&sweep garbage collector.
 //!
 //! This GC is based on mruby gc.
+//!
+//! Incremental collection is triggered on allocation if allocated objects count is bigger than threshold.
+//! Current implementation have it's own threshold for incremental collection (256 objects at start) and you cannot configure it
+//! through 'Config'.
 use crate::heap::freelist::FreeList;
 use crate::heap::freelist_alloc::FreeListAllocator;
 use crate::runtime::cell::*;

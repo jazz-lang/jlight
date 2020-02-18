@@ -179,4 +179,12 @@ impl List for StubList {
     fn push_front_(&mut self, st: Ptr<Self::NodeType>) {
         self.push_front(st);
     }
+
+    fn is_empty(&self) -> bool {
+        self.empty()
+    }
+
+    fn node_size(&self) -> usize {
+        std::mem::size_of::<Stub>()
+    }
 }

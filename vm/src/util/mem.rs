@@ -523,11 +523,11 @@ impl Access {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Address(usize);
+pub struct Address(pub usize);
 
 impl Address {
     #[inline(always)]
-    pub fn from(val: usize) -> Address {
+    pub const fn from(val: usize) -> Address {
         Address(val)
     }
 

@@ -1,9 +1,12 @@
-//! Generational copying garbage collector.
+//! Generational semispace garbage collector.
 //!
 //! The heap is divided into two spaces: one for old objects and second one is for young objects.
 //! Young heap is larger than old heap because most objects should die young.
 //!
 //! This GC moves object to old heap when object generation is bigger than 5th gen.
+//!
+//! Current implementation does not support object finalization thus you should close IO handles or do some finalization
+//! by your hand when using this GC.
 
 use super::Space;
 use super::*;
@@ -18,8 +21,6 @@ pub struct Heap {
     pub new_space: Space,
     pub old_space: Space,
     pub needs_gc: GCType,
-    /// We keep track of all allocated objects so we can properly deallocate them at GC cycle or when this heap is destroed.
-    pub allocated: Vec<CellPointer>,
     pub remembered: HashSet<usize, FxBuildHasher>,
 }
 
@@ -29,7 +30,6 @@ impl Heap {
             new_space: Space::new(young_page_size),
             old_space: Space::new(old_page_size),
             needs_gc: GCType::None,
-            allocated: Vec::new(),
             remembered: HashSet::with_capacity_and_hasher(32, FxBuildHasher::default()),
         }
     }
@@ -48,9 +48,6 @@ impl Heap {
             result.write(cell);
         }
         self.needs_gc = if needs_gc { tenure } else { GCType::None };
-        self.allocated.push(CellPointer {
-            raw: crate::util::tagged::TaggedPointer::new(result),
-        });
         CellPointer {
             raw: crate::util::tagged::TaggedPointer::new(result),
         }
@@ -59,13 +56,6 @@ impl Heap {
 
 impl Drop for Heap {
     fn drop(&mut self) {
-        while let Some(cell) = self.allocated.pop() {
-            unsafe {
-                if cell.raw.is_null() == false {
-                    std::ptr::drop_in_place(cell.raw.raw);
-                }
-            }
-        }
         self.new_space.clear();
         self.old_space.clear();
     }
@@ -143,32 +133,6 @@ impl GC {
         } else {
             &mut heap.old_space
         };
-        for page in space.pages.iter() {
-            let end = page.top;
-
-            log::trace!(
-                "Sweeping memory page from {:p} to {:p} (memory page limit is {:p})",
-                page.data.to_ptr::<u8>(),
-                page.top.to_ptr::<u8>(),
-                page.limit.to_ptr::<u8>()
-            );
-            let mut scan = page.data;
-
-            while scan < end {
-                let cell_ptr = scan.to_mut_ptr::<Cell>();
-                let cell = CellPointer {
-                    raw: crate::util::tagged::TaggedPointer::new(cell_ptr),
-                };
-                if (cell.get().color & CELL_WHITES) != 0 {
-                    log::trace!("Sweep {:p} '{}'", cell_ptr, cell);
-                    unsafe {
-                        std::ptr::drop_in_place(cell_ptr);
-                    }
-                    cell.get_mut().generation = 127;
-                }
-                scan = scan.offset(std::mem::size_of::<Cell>());
-            }
-        }
         while let Some(item) = self.black_items.pop_back() {
             item.value.set_color(CELL_WHITE_A);
             item.value.soft_mark(false);
@@ -357,6 +321,9 @@ impl HeapTrait for GenerationalCopyGC {
         if (self.threshold as f64) < self.heap.new_space.allocated_size as f64 * USED_SPACE_RATIO {
             self.threshold =
                 (self.heap.new_space.allocated_size as f64 / USED_SPACE_RATIO) as usize;
+        }
+        if (self.mature_threshold as f64) < self.heap.old_space.allocated_size as f64 * 0.5 {
+            self.mature_threshold = (self.heap.old_space.allocated_size as f64 / 0.5) as usize;
         }
     }
 
