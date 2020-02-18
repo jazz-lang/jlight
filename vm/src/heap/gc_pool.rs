@@ -59,8 +59,8 @@ impl Collection {
 
     pub fn perform(&self, state: &State) {
         let local_data = self.process.local_data_mut();
-        local_data.heap.trace_process(&self.process);
-        local_data.heap.collect_garbage();
+        //local_data.heap.trace_process(&self.process);
+        local_data.heap.collect_garbage(&self.process);
         state.scheduler.schedule(self.process.clone());
     }
 }

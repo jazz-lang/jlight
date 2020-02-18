@@ -28,11 +28,20 @@ impl<T: Sized> Ptr<T> {
     pub fn write(&self, value: T) {
         unsafe { std::ptr::write(self.raw, value) }
     }
+    pub const fn null() -> Self {
+        Self {
+            raw: std::ptr::null_mut(),
+        }
+    }
 }
 
 impl<T: ?Sized> Ptr<T> {
     pub fn get(&self) -> &mut T {
         unsafe { &mut *self.raw }
+    }
+
+    pub fn is_null(self) -> bool {
+        self.raw.is_null()
     }
 }
 

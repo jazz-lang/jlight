@@ -139,35 +139,6 @@ impl IncrementalCollector {
 
     fn incremental_sweep_phase(&mut self, limit: usize) -> usize {
         let mut tried_sweep = 0;
-        /*let mut garbage_start = Address::null();
-        let end = self.allocator.top;
-        let mut scan = self.heap.start;
-        while scan < end && tried_sweep < limit {
-            let cell_ptr = scan.to_mut_ptr::<Cell>();
-            let cell = CellPointer {
-                raw: crate::util::tagged::TaggedPointer::new(cell_ptr),
-            };
-
-            if self.is_minor() && cell.get().generation >= 5 {
-                self.add_freelist(garbage_start, Address::from_ptr(cell_ptr));
-                scan = scan.offset(std::mem::size_of::<Cell>());
-                continue;
-            }
-            if self.is_dead(cell) {
-                if !garbage_start.is_non_null() {
-                    garbage_start = Address::from_ptr(cell_ptr);
-                }
-                log::trace!("Sweep {:p}", cell_ptr);
-                tried_sweep += 1;
-            } else {
-                self.add_freelist(garbage_start, Address::from_ptr(cell_ptr));
-                if !self.generational {
-                    paint_partial_white(self, cell);
-                }
-            }
-
-            scan = scan.offset(std::mem::size_of::<Cell>());
-        }*/
         let mut freelist = FreeList::new();
         macro_rules! add_freelist {
             ($start: expr,$end: expr) => {
@@ -440,15 +411,24 @@ impl HeapTrait for IncrementalCollector {
         self.threshold < self.live
     }
     /// Perform a minor incremental GC cycle.
-    fn minor_collect(&mut self) {
+    fn minor_collect(&mut self, proc: &Arc<Process>) {
+        if self.process.is_none() {
+            self.process = Some(proc.clone());
+        }
         self.minor();
     }
     /// Perform a full GC cycle.
-    fn major_collect(&mut self) {
+    fn major_collect(&mut self, proc: &Arc<Process>) {
+        if self.process.is_none() {
+            self.process = Some(proc.clone());
+        }
         self.major();
     }
 
-    fn collect_garbage(&mut self) {
+    fn collect_garbage(&mut self, proc: &Arc<Process>) {
+        if self.process.is_none() {
+            self.process = Some(proc.clone());
+        }
         self.major();
     }
     /// Field write barrier.

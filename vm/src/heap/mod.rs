@@ -1,3 +1,4 @@
+pub mod cms;
 pub mod freelist;
 pub mod freelist_alloc;
 pub mod gc_pool;
@@ -186,16 +187,16 @@ pub trait HeapTrait {
         Value::from(self.allocate(GCType::Young, copy))
     }
     /// Collect garbage.
-    fn collect_garbage(&mut self);
+    fn collect_garbage(&mut self, proc: &Arc<crate::runtime::process::Process>);
     /// Minor GC cycle.
     ///
     /// If incremental algorithm is used this should trigger incremental mark&sweep.
-    fn minor_collect(&mut self) {
-        self.collect_garbage();
+    fn minor_collect(&mut self, proc: &Arc<crate::runtime::process::Process>) {
+        self.collect_garbage(proc);
     }
     /// Major GC cycle.
-    fn major_collect(&mut self) {
-        self.collect_garbage();
+    fn major_collect(&mut self, proc: &Arc<crate::runtime::process::Process>) {
+        self.collect_garbage(proc);
     }
     /// Clear memory.
     fn clear(&mut self) {}

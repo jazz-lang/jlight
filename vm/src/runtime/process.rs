@@ -367,9 +367,9 @@ impl Process {
         self.local_data().status.is_blocking()
     }
 
-    pub fn do_gc(&self) {
-        let local_data = self.local_data_mut();
-        local_data.heap.collect_garbage();
+    pub fn do_gc(this: &Arc<Process>) {
+        let local_data = this.local_data_mut();
+        local_data.heap.collect_garbage(this);
     }
 
     pub fn allocate_string(&self, state: &RcState, string: &str) -> Value {

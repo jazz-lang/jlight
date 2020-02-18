@@ -328,12 +328,31 @@ impl HeapTrait for GenerationalCopyGC {
         cell
     }
 
-    fn collect_garbage(&mut self) {
+    fn collect_garbage(&mut self, proc: &Arc<crate::runtime::process::Process>) {
         if self.heap.new_space.size >= self.threshold {
             self.heap.needs_gc = GCType::Young;
         } else if self.heap.old_space.size >= self.mature_threshold {
             self.heap.needs_gc = GCType::Old;
         }
+        let channel = proc.local_data().channel.lock();
+        channel.trace(|pointer| {
+            self.gc.grey_items.push_back(unsafe {
+                Box::new(GCValue {
+                    slot: pointer as *mut _,
+                    value: *pointer,
+                    link: LinkedListLink::new(),
+                })
+            })
+        });
+        proc.trace(|pointer| {
+            self.gc.grey_items.push_back(unsafe {
+                Box::new(GCValue {
+                    slot: pointer as *mut _,
+                    value: *pointer,
+                    link: LinkedListLink::new(),
+                })
+            })
+        });
         self.gc.collect_garbage(&mut self.heap);
         if (self.threshold as f64) < self.heap.new_space.allocated_size as f64 * USED_SPACE_RATIO {
             self.threshold =
