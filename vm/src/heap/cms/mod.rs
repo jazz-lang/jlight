@@ -1,8 +1,4 @@
 //! Concurrent Mark&Sweep collector
-//!
-//! This GC performs small pauses to trace roots and then resumes process execution and does all work in background thread
-//!
-//!
 
 use crate::util::mem::Address;
 use parking_lot::Mutex;

@@ -216,18 +216,18 @@ impl IncrementalCollector {
         while let Some(value) = self.grey.pop_front() {
             if is_grey(value) {
                 paint_black(value);
-                self.mark_children(value);
             }
+            self.mark_children(value);
         }
         self.grey.clear();
         let mut empty = LinkedList::new();
         std::mem::swap(&mut self.atomic_grey, &mut empty);
         std::mem::replace(&mut self.grey, empty);
         while let Some(value) = self.grey.pop_front() {
-            if is_grey(value) {
+            if is_grey(value) && !value.is_permanent() {
                 paint_black(value);
-                self.mark_children(value);
             }
+            self.mark_children(value);
         }
     }
     fn mark(&mut self, obj: CellPointer) {
@@ -236,10 +236,9 @@ impl IncrementalCollector {
         }
         if !obj.is_permanent() {
             paint_grey(obj);
-            log::trace!("Mark {:p} '{}'", obj.raw.raw, obj);
-
-            self.grey.push_front(obj);
         }
+        log::trace!("Mark {:p} '{}'", obj.raw.raw, obj);
+        self.grey.push_front(obj);
     }
 
     fn incremental_marking_phase(&mut self, limit: usize) -> usize {

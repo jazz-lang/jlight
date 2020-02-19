@@ -200,8 +200,6 @@ impl GC {
                         value.value.get().generation
                     );
                     if !value.value.is_soft_marked() {
-                        value.value.soft_mark(true);
-                        value.value.set_color(CELL_BLACK);
                         value.value.get().trace(|ptr| {
                             self.grey_items.push_back(Box::new(GCValue {
                                 link: LinkedListLink::new(),
@@ -209,7 +207,11 @@ impl GC {
                                 value: unsafe { *ptr },
                             }))
                         });
-                        self.black_items.push_back(value);
+                        if !value.value.is_permanent() {
+                            value.value.soft_mark(true);
+                            value.value.set_color(CELL_BLACK);
+                            self.black_items.push_back(value);
+                        }
                     }
                     continue;
                 }
