@@ -77,7 +77,7 @@ impl GCValue {
             }
         }
         if !self.value.is_marked() {
-            self.value.set_color(CELL_BLACK);
+            self.value.mark(true);
             self.value.get_mut().forward = Address::from_ptr(address.raw.raw);
         }
     }
@@ -92,6 +92,7 @@ pub struct GC {
     black_items: LinkedList<GCValueAdapter>,
     tmp_space: Space,
     gc_ty: GCType,
+    white: u8,
 }
 
 impl GC {
@@ -101,10 +102,20 @@ impl GC {
             grey_items: LinkedList::new(GCValueAdapter::new()),
             black_items: LinkedList::new(GCValueAdapter::new()),
             gc_ty: GCType::None,
+            white: CELL_WHITE_B,
+        }
+    }
+
+    pub fn flip_white(&mut self) {
+        match self.white {
+            CELL_WHITE_A => self.white = CELL_WHITE_B,
+            CELL_WHITE_B => self.white = CELL_WHITE_A,
+            _ => unreachable!(),
         }
     }
 
     pub fn collect_garbage(&mut self, heap: &mut Heap) {
+        self.flip_white();
         if heap.needs_gc == GCType::None {
             heap.needs_gc = GCType::Young;
         }
@@ -143,6 +154,32 @@ impl GC {
         } else {
             &mut heap.old_space
         };
+
+        for page in space.pages.iter() {
+            let end = page.top;
+            log::trace!(
+                "Sweeping memory page from {:p} to {:p} (memory page limit is {:p})",
+                page.data.to_ptr::<u8>(),
+                page.top.to_ptr::<u8>(),
+                page.limit.to_ptr::<u8>()
+            );
+            let mut scan = page.data;
+            while scan < end {
+                let cell_ptr = scan.to_mut_ptr::<Cell>();
+                scan = scan.offset(std::mem::size_of::<Cell>());
+                let cell = CellPointer {
+                    raw: crate::util::tagged::TaggedPointer::new(cell_ptr),
+                };
+
+                if !cell.is_marked() {
+                    log::trace!("Sweep {:p} '{}'", cell_ptr, cell);
+                    unsafe {
+                        std::ptr::drop_in_place(cell.raw.raw);
+                    }
+                }
+            }
+        }
+
         space.swap(&mut tmp_space);
 
         if self.gc_ty != GCType::Young || heap.needs_gc == GCType::Young {
@@ -181,17 +218,8 @@ impl GC {
             if value.value.raw.is_null() {
                 continue;
             }
-            log::trace!(
-                "Process {:p} (color is {})",
-                value.value.raw.raw,
-                match value.value.get_color() {
-                    CELL_WHITE_A => "white",
-                    CELL_BLACK => "black",
-                    CELL_GREY => "grey",
-                    _ => unreachable!(),
-                }
-            );
-            if value.value.get_color() == CELL_WHITE_A {
+            log::trace!("Process {:p}", value.value.raw.raw,);
+            if !value.value.is_marked() {
                 if !self.is_in_current_space(&value.value) {
                     log::trace!(
                         "{:p} is not in {:?} space (generation: {})",
@@ -209,7 +237,7 @@ impl GC {
                         });
                         if !value.value.is_permanent() {
                             value.value.soft_mark(true);
-                            value.value.set_color(CELL_BLACK);
+                            value.value.mark(true);
                             self.black_items.push_back(value);
                         }
                     }
@@ -236,9 +264,6 @@ impl GC {
                 log::trace!("Copy {:p}->{:p}", value.value.raw.raw, hvalue.raw.raw);
                 value.relocate(hvalue);
                 value.value.get().trace(|ptr| {
-                    unsafe {
-                        (*ptr).set_color(CELL_GREY);
-                    }
                     self.grey_items.push_back(Box::new(GCValue {
                         link: LinkedListLink::new(),
                         slot: ptr as *mut CellPointer,

@@ -25,6 +25,12 @@ pub struct StubList {
 }
 
 impl StubList {
+    pub fn new() -> Self {
+        Self {
+            head: Ptr::null(),
+            tail: Ptr::null(),
+        }
+    }
     pub fn append(&mut self, sl: &mut Self) {
         if !self.tail.is_null() {
             self.tail.get().next = sl.head;

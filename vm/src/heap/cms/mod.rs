@@ -1,14 +1,22 @@
 //! Concurrent Mark&Sweep collector
 
 use crate::util::mem::Address;
+use crossbeam::epoch::Atomic;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 pub mod atomic_list;
+pub mod color;
 pub mod node_pool;
+pub mod phase;
 pub mod stub;
+use color::*;
+use crossbeam::epoch::pin as _pin;
+use phase::*;
 
-pub struct CMS {
-    reg_mut: Mutex<()>,
+macro_rules! guard {
+    () => {
+        &_pin()
+    };
 }
 
 pub type UnderlyingHeader = u64;
@@ -42,3 +50,77 @@ pub const MARK_TICK_FREQUENCY: usize = 64;
 pub const POOL_CHUNK_SIZE: usize = 64;
 pub const SMALL_SIZE_CLASSES: usize = 7;
 pub const TICK_FREQUENCY: usize = 32;
+
+pub struct CMS {
+    reg_mut: Mutex<()>,
+    small_used_lists: [Atomic<stub::StubList>; SMALL_SIZE_CLASSES],
+    small_free_lists: [Atomic<stub::StubList>; SMALL_SIZE_CLASSES],
+    running: AtomicBool,
+    active: AtomicUsize,
+    shook: AtomicUsize,
+    phase: Atomic<Phase>,
+    alloc_color: AtomicU8,
+}
+
+impl CMS {
+    pub fn new() -> Self {
+        CMS {
+            reg_mut: Mutex::new(()),
+            small_free_lists: [
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+            ],
+            small_used_lists: [
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+                Atomic::new(stub::StubList::new()),
+            ],
+            running: AtomicBool::new(false),
+            active: AtomicUsize::new(0),
+            shook: AtomicUsize::new(0),
+            phase: Atomic::new(Phase::First),
+            alloc_color: AtomicU8::new(Color::White as _),
+        }
+    }
+
+    pub fn try_advance(&mut self) -> bool {
+        if self.shook.load(Ordering::Relaxed) == self.active.load(Ordering::Relaxed) {
+            let lk = self.reg_mut.lock();
+            if self.shook.load(Ordering::Relaxed) == self.active.load(Ordering::Relaxed) {
+                self.shook.store(0, Ordering::Relaxed);
+                let g = _pin();
+                let mut p = self.phase.load(Ordering::Relaxed, &g);
+
+                if unsafe { *p.deref() } == Phase::Second {
+                    let prev_color: Color =
+                        unsafe { std::mem::transmute(self.alloc_color.load(Ordering::Relaxed)) };
+                    self.alloc_color
+                        .store(prev_color.flip() as u8, Ordering::Relaxed);
+                }
+                self.phase.store(
+                    crossbeam::epoch::Owned::new(unsafe { p.deref_mut().advance() }),
+                    Ordering::Relaxed,
+                );
+                drop(lk);
+                return true;
+            }
+
+            drop(lk);
+        }
+        false
+    }
+}
+
+fn header(p: Address) -> UnderlyingHeader {
+    let h: &Header = unsafe { &*p.to_mut_ptr::<AtomicU64>() };
+    h.load(Ordering::Relaxed)
+}

@@ -4,10 +4,23 @@ use module::*;
 use process::*;
 use value::*;
 use waffle::bytecode::*;
+use waffle::heap::cms::atomic_list::AtomicList;
 use waffle::runtime::*;
 use waffle::util::arc::Arc;
+
 fn main() {
-    //simple_logger::init().unwrap();
+    let l = Arc::new(AtomicList::new());
+    let l2 = l.clone();
+    std::thread::spawn(move || {
+        //std::thread::sleep(std::time::Duration::from_millis(100));
+        l2.push(42);
+    });
+    println!("{:?}", l);
+    println!("{:?}", l.pop());
+}
+/*
+fn main() {
+    simple_logger::init().unwrap();
     let mut m = Arc::new(Module::new("Main"));
     let code = basicblock::BasicBlock::new(vec![Instruction::Gc, Instruction::Return(None)], 0);
     let func = Function {
@@ -87,3 +100,4 @@ fn main() {
         e.as_millis()
     )
 }
+*/

@@ -80,12 +80,14 @@ pub fn initialize_process_heap(variant: GCVariant, config: &Config) -> Box<dyn H
 /// Values that will not be collected and *must* be alive through entire program live should be allocated in perm heap.
 pub struct PermanentHeap {
     pub space: Space,
+    pub allocated: Vec<CellPointer>,
 }
 
 impl PermanentHeap {
     pub fn new(perm_size: usize) -> Self {
         Self {
             space: Space::new(perm_size),
+            allocated: Vec::with_capacity(64),
         }
     }
     pub fn allocate_empty(&mut self) -> Value {
@@ -102,13 +104,19 @@ impl PermanentHeap {
         let mut cell = CellPointer {
             raw: crate::util::tagged::TaggedPointer::new(pointer),
         };
-        cell.set_permanent();
+        unsafe { cell.set_permanent() };
+        self.allocated.push(cell);
         Value::from(cell)
     }
 }
 
 impl Drop for PermanentHeap {
     fn drop(&mut self) {
+        while let Some(cell) = self.allocated.pop() {
+            unsafe {
+                std::ptr::drop_in_place(cell.raw.raw);
+            }
+        }
         self.space.clear();
     }
 }

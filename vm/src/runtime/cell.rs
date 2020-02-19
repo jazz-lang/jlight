@@ -341,12 +341,15 @@ impl CellPointer {
     pub fn get_mut(&self) -> &mut Cell {
         self.raw.as_mut().unwrap()
     }
-
+    /// Returns true if this cell is from permanent heap.
+    ///
+    /// Multiple threads may invoke this method and no races will occure since we just check one bit from pointer
+    /// and do not update pointer.
     pub fn is_permanent(&self) -> bool {
         self.raw.bit_is_set(0)
     }
-
-    pub fn set_permanent(&mut self) {
+    /// Set permanent bit in object. This method is *unsafe* because races may occure if you will try to use this method.
+    pub unsafe fn set_permanent(&mut self) {
         self.raw.set_bit(0)
     }
 
