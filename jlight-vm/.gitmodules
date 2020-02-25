@@ -1,3 +1,0 @@
-[submodule "regalloc.rs"]
-	path = regalloc.rs
-	url = https://github.com/bnjbvr/regalloc.rs/
