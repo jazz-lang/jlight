@@ -34,14 +34,24 @@ fn main() {
     let mut ast = vec![];
     let r = Reader::from_string(
         "
+var parent = Process.current()
+var p = Process.spawn(|| {
+    var i = 0
+    while i < 100000 {
+        io.writeln(i)
+        i = i + 1
+    }
+    Process.send(parent,0)
+})
 var i = 0
-if false {
-    io.writeln(1)
-} else if true {
-    io.writeln(3)
-} else {
-    io.writeln(2)
+while i < 10000 {
+    io.writeln(\"WOOOW!\",i)
+    i = i + 1
 }
+
+
+Process.recv()
+
 ",
     );
     let mut p = Parser::new(r, &mut ast);

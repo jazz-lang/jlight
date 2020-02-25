@@ -199,7 +199,7 @@ impl Context {
                 let (gid, _) = self.global(&Global::Str(f.to_owned()));
                 let obj = self.compile(&*obj, false);
                 //self.write(Instruction::LoadConst(sr, gid as _));
-                self.write(Instruction::StoreByIndex(obj, r, gid as _));
+                self.write(Instruction::StoreById(obj, r, gid as _));
                 return r;
             }
             Access::Index(_) => unimplemented!(),
@@ -390,7 +390,7 @@ impl Context {
                     last
                 });
                 match last {
-                    Some(r) => r,
+                    Some(r) if r != 0 => r,
                     _ => {
                         let x = self.new_reg();
                         self.write(Instruction::LoadNull(x));
@@ -872,6 +872,14 @@ pub fn module_from_ctx(context: &Context) -> Arc<Module> {
             upvalues: vec![],
             md: Default::default(),
         });
+        fun.add_attribute_without_barrier(
+            &rt.state,
+            Arc::new("prototype".to_owned()),
+            rt.state.allocate(Cell::with_prototype(
+                CellValue::None,
+                rt.state.object_prototype.as_cell(),
+            )),
+        );
         m.globals[*gid as usize] = fun;
     }
 
