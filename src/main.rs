@@ -24,49 +24,42 @@ use jlight::parser::*;
 use jlight::reader::*;
 use module::*;
 use process::*;
+use std::io::Write;
+use std::path::PathBuf;
+use structopt::StructOpt;
 use value::*;
 use waffle::bytecode::*;
 use waffle::runtime::*;
 use waffle::util::arc::Arc;
-fn main() {
-    simple_logger::init().unwrap();
-    let start_time = std::time::Instant::now();
-    let mut ast = vec![];
-    let r = Reader::from_string(
-        "
-var parent = Process.current()
-var p = Process.spawn(|| {
-    var i = 0
-    while i < 100000 {
-        io.writeln(i)
-        i = i + 1
-    }
-    Process.send(parent,0)
-})
-var i = 0
-while i < 10000 {
-    io.writeln(\"WOOOW!\",i)
-    i = i + 1
+use writer::BytecodeWriter;
+#[derive(Debug, StructOpt)]
+#[structopt(name = "jazzlight", about = "Compiler")]
+struct Opt {
+    #[structopt(parse(from_os_str))]
+    input: PathBuf,
+
+    #[structopt(parse(from_os_str))]
+    output: Option<PathBuf>,
 }
 
-
-Process.recv()
-
-",
-    );
+fn main() {
+    simple_logger::init().unwrap();
+    let opt: Opt = Opt::from_args();
+    let mut ast = vec![];
+    let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
     p.parse().unwrap();
     let mut m = compile(ast);
     m.finalize();
-    let module = module_from_ctx(&m);
+    let mut module = module_from_ctx(&m);
     disassemble_module(&module);
-    let proc = Process::from_function(
-        module.globals.last().map(|x| *x).unwrap(),
-        &config::Config::default(),
-    )
-    .unwrap();
-    println!("Scheduling process...");
-    RUNTIME.schedule_main_process(proc.clone());
-    RUNTIME.start_pools();
-    //RUNTIME.state.gc.major_collection(&RUNTIME.state);
+    let mut writer = BytecodeWriter { bytecode: vec![] };
+    writer.write_module(&mut module);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(opt.output.unwrap_or(PathBuf::from("a.out")))
+        .unwrap();
+    f.set_len(0).unwrap();
+    f.write_all(&writer.bytecode).unwrap();
 }

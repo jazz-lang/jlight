@@ -10,8 +10,9 @@ edition = "2018"
 hmap = "0.1"
 hashlink = "0.4"
 simple_logger = "*"
+structopt = "0.3"
 log = "0.4"
-waffle = {path = "waffle"}
+waffle = {git = "https://github.com/jazz-lang/waffle"}
 [profile.release]
 opt-level = 3
 lto = true

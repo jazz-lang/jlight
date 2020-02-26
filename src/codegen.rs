@@ -564,7 +564,7 @@ impl Context {
                         break_point: break_point_bb as _,
                         continue_point: expr_check_bb_id as _,
                     },
-                    |ctx| ctx.compile(block, tail),
+                    |ctx| ctx.scoped(|ctx| ctx.compile(block, tail)),
                 );
                 self.write(Instruction::Branch(expr_check_bb_id as _));
                 let end_bb_id = self.current_bb + 1;
@@ -669,6 +669,9 @@ impl Context {
             let r = ctx.new_reg();
             ctx.write(Instruction::Pop(r));
             ctx.locals.insert(p.to_owned(), r as _);
+        }
+        if vname.is_some() {
+            self.global(&Global::Str(vname.as_ref().unwrap().to_owned()));
         }
 
         let gid = ctx.g.borrow().table.len();
@@ -792,7 +795,10 @@ impl Context {
         let mut pass = RegisterAllocationPass::new();
         let mut bbs = Arc::new(self.bbs.clone());
         let mut simplify = SimplifyCFGPass;
-        //simplify.execute(&mut bbs);
+        simplify.execute(&mut bbs);
+        if bbs.last().is_some() && bbs.last().unwrap().instructions.is_empty() {
+            bbs.pop();
+        }
         log::trace!("Before RA: ");
         for (i, bb) in bbs.iter().enumerate() {
             log::trace!("{}:", i);
@@ -802,8 +808,8 @@ impl Context {
         }
         pass.execute(&mut bbs);
 
-        //let mut ret_sink = RetSink;
-        //ret_sink.execute(&mut bbs);
+        let mut ret_sink = RetSink;
+        ret_sink.execute(&mut bbs);
         let mut simplify = SimplifyCFGPass;
         simplify.execute(&mut bbs);
         let mut peephole = PeepholePass;
@@ -842,6 +848,7 @@ pub fn compile(ast: Vec<Box<Expr>>) -> Context {
         ctx.write(Instruction::LoadNull(r));
         ctx.write(Instruction::Return(Some(r)));
     }
+    ctx.global(&Global::Str("main".to_owned()));
     ctx
 }
 
@@ -863,8 +870,9 @@ pub fn module_from_ctx(context: &Context) -> Arc<Module> {
         let object = state.gc.allocate(&RUNTIME.state, object);
         //let prototype = Object::with_prototype(ObjectValue::None, state.object_prototype);
         m.globals.get()[*gid as usize] = object;*/
+        let interned = rt.state.intern(name);
         let fun = rt.state.allocate_fn(Function {
-            name: Value::from(rt.state.intern(name)),
+            name: Value::from(interned),
             argc: *params as i32,
             code: Arc::new(blocks.clone()),
             module: m.clone(),
@@ -911,6 +919,9 @@ pub fn disassemble_module(module: &Arc<Module>) {
     for global in module.globals.iter() {
         if !global.is_cell() {
             continue;
+        }
+        if global.is_empty() {
+            panic!();
         }
         match global.as_cell().get().value {
             CellValue::Function(ref func) => {
