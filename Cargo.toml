@@ -8,12 +8,11 @@ edition = "2018"
 
 [dependencies]
 hmap = "0.1"
-jlight-vm = {path = "jlight-vm"}
-regalloc = "0.0.4"
 hashlink = "0.4"
 simple_logger = "*"
-
+log = "0.4"
+waffle = {path = "waffle"}
 [profile.release]
-opt-level = 2
+opt-level = 3
 lto = true
 debug = true
