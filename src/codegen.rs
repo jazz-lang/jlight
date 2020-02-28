@@ -704,7 +704,7 @@ impl Context {
         ));
 
         if ctx.nenv > 0 {
-            for (var, _) in ctx.used_upvars.iter() {
+            for (var, _) in ctx.used_upvars.iter().rev() {
                 let r = self.ident(var);
                 self.write(Instruction::Push(r));
             }
@@ -839,7 +839,7 @@ pub fn compile(ast: Vec<Box<Expr>>) -> Context {
         pos: crate::token::Position::new(0, 0),
         expr: ExprKind::Block(ast.clone()),
     });
-
+    ctx.global(&Global::Str("<anonymous>".to_owned()));
     let r = ctx.compile(&ast, false);
     if r != 0 {
         ctx.write(Instruction::Return(Some(r)));
