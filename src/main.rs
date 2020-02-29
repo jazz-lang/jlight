@@ -35,11 +35,16 @@ use writer::BytecodeWriter;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "jazzlight", about = "Compiler")]
 struct Opt {
-    #[structopt(parse(from_os_str))]
+    #[structopt(name = "FILE", parse(from_os_str))]
     input: PathBuf,
 
-    #[structopt(parse(from_os_str))]
-    output: Option<PathBuf>,
+    #[structopt(
+        parse(from_os_str),
+        long = "output",
+        short = "o",
+        default_value = "a.out"
+    )]
+    output: PathBuf,
 }
 
 fn main() {
@@ -58,7 +63,7 @@ fn main() {
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open(opt.output.unwrap_or(PathBuf::from("a.out")))
+        .open(opt.output)
         .unwrap();
     f.set_len(0).unwrap();
     f.write_all(&writer.bytecode).unwrap();
