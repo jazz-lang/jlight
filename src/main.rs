@@ -17,20 +17,13 @@
 
 extern crate jlightc as jlight;
 
-use cell::*;
-use instruction::*;
 use jlight::codegen::*;
 use jlight::parser::*;
 use jlight::reader::*;
-use module::*;
-use process::*;
 use std::io::Write;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use value::*;
 use waffle::bytecode::*;
-use waffle::runtime::*;
-use waffle::util::arc::Arc;
 use writer::BytecodeWriter;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "jazzlight", about = "Compiler")]

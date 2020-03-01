@@ -188,7 +188,7 @@ impl Context {
                 self.write(Instruction::StoreUpvalue(r, n as _));
                 return r;
             }
-            Access::Stack(name, l) => {
+            Access::Stack(_name, l) => {
                 //let l = self.new_reg();
                 self.write(Instruction::Move(l as _, r));
                 //self.locals.insert(name, l as _);
