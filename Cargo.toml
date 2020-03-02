@@ -12,8 +12,8 @@ hashlink = "0.4"
 simple_logger = "*"
 structopt = "0.3"
 log = "0.4"
-waffle = {git = "https://github.com/jazz-lang/waffle"}
-#waffle = {path = "waffle"}
+#waffle = {git = "https://github.com/jazz-lang/waffle"}
+waffle = {path = "waffle"}
 [profile.release]
 opt-level = 3
 lto = true

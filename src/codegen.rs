@@ -366,6 +366,11 @@ impl Context {
                 self.write_break();
                 0
             }
+            ExprKind::Throw(e) => {
+                let r = self.compile(e,tail);
+                self.write(Instruction::Throw(r));
+                0
+            }
             ExprKind::Continue => {
                 self.write_continue();
                 0
@@ -833,12 +838,18 @@ impl Context {
     }
 }
 
-pub fn compile(ast: Vec<Box<Expr>>) -> Context {
+pub fn compile(ast: Vec<Box<Expr>>,no_std: bool) -> Context {
     let mut ctx = Context::new();
     let ast = Box::new(Expr {
         pos: crate::token::Position::new(0, 0),
         expr: ExprKind::Block(ast.clone()),
     });
+    if !no_std {
+        let (r1,r2) = (ctx.new_reg(),ctx.new_reg());
+        let (gid,_) = ctx.global(&Global::Str("__start__".to_owned()));
+        ctx.write(Instruction::LoadStaticById(r1,gid as _));
+        ctx.write(Instruction::Call(r2,r1,0));
+    }
     ctx.global(&Global::Str("<anonymous>".to_owned()));
     let r = ctx.compile(&ast, false);
     if r != 0 {

@@ -26,28 +26,36 @@ use structopt::StructOpt;
 use waffle::bytecode::*;
 use writer::BytecodeWriter;
 #[derive(Debug, StructOpt)]
-#[structopt(name = "jazzlight", about = "Compiler")]
+#[structopt(name = "jlightc", about = "Compiler")]
 struct Opt {
-    #[structopt(name = "FILE", parse(from_os_str))]
-    input: PathBuf,
+    #[structopt(
+        long = "no_std",
+        help = "Do not invoke __start__ function from Waffle runtime to load core modules",
+    )]
+    no_std: bool,
 
+
+    #[structopt(name = "FILE",parse(from_os_str))]
+    input: PathBuf,
     #[structopt(
         parse(from_os_str),
-        long = "output",
-        short = "o",
-        default_value = "a.out"
+        long,short,
+        default_value = "program.wfl"
     )]
-    output: PathBuf,
+    output: PathBuf
+
+
 }
 
 fn main() {
-    simple_logger::init().unwrap();
+    //simple_logger::init().unwrap();
     let opt: Opt = Opt::from_args();
     let mut ast = vec![];
+    let no_std = std::env::var("NO_STD_BUILD").is_ok();
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
     p.parse().unwrap();
-    let mut m = compile(ast);
+    let mut m = compile(ast,no_std);
     m.finalize();
     let mut module = module_from_ctx(&m);
     disassemble_module(&module);
@@ -56,7 +64,8 @@ fn main() {
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
-        .open(opt.output)
+        .open("program.wfl")
+        //.open(opt.output)
         .unwrap();
     f.set_len(0).unwrap();
     f.write_all(&writer.bytecode).unwrap();
