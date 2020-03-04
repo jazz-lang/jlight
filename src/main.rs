@@ -29,22 +29,15 @@ use writer::BytecodeWriter;
 #[structopt(name = "jlightc", about = "Compiler")]
 struct Opt {
     #[structopt(
-        long = "no_std",
-        help = "Do not invoke __start__ function from Waffle runtime to load core modules",
+        long,
+        help = "Do not invoke __start__ function from Waffle runtime to load core modules"
     )]
     no_std: bool,
 
-
-    #[structopt(name = "FILE",parse(from_os_str))]
+    #[structopt(name = "FILE", parse(from_os_str))]
     input: PathBuf,
-    #[structopt(
-        parse(from_os_str),
-        long,short,
-        default_value = "program.wfl"
-    )]
-    output: PathBuf
-
-
+    #[structopt(parse(from_os_str), long, short, default_value = "program.wfl")]
+    output: PathBuf,
 }
 
 fn main() {
@@ -55,8 +48,8 @@ fn main() {
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
     p.parse().unwrap();
-    let mut m = compile(ast,no_std);
-    m.finalize();
+    let mut m = compile(ast, no_std || opt.no_std);
+    m.finalize(false);
     let mut module = module_from_ctx(&m);
     disassemble_module(&module);
     let mut writer = BytecodeWriter { bytecode: vec![] };

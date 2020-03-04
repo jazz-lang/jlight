@@ -367,7 +367,7 @@ impl Context {
                 0
             }
             ExprKind::Throw(e) => {
-                let r = self.compile(e,tail);
+                let r = self.compile(e, tail);
                 self.write(Instruction::Throw(r));
                 0
             }
@@ -620,6 +620,17 @@ impl Context {
 
                 r
             }
+            ExprKind::Unop(op, val) => {
+                let r = self.compile(val, tail);
+                let dest = self.new_reg();
+                let op: &str = op;
+                match op {
+                    "-" => self.write(Instruction::Unary(UnaryOp::Neg, dest, r)),
+                    "!" => self.write(Instruction::Unary(UnaryOp::Not, dest, r)),
+                    _ => self.write(Instruction::Move(dest, r)),
+                }
+                dest
+            }
             ExprKind::Lambda(arguments, body) => self.compile_function(arguments, body, None),
             ExprKind::Access(f, s) => {
                 let acc = self.compile_access(&ExprKind::Access(f.clone(), s.clone()));
@@ -697,7 +708,7 @@ impl Context {
         }
         //jlight_vm::runtime::fusion::optimizer::simplify_cfg(&mut ctx.bbs);
 
-        ctx.finalize();
+        ctx.finalize(true);
         //ctx.check_stack(s, "");
 
         ctx.g.borrow_mut().functions.push((
@@ -787,7 +798,7 @@ impl Context {
         }
     }
 
-    pub fn finalize(&mut self) {
+    pub fn finalize(&mut self,tail: bool) {
         if self.bbs.last().is_some() && self.bbs.last().unwrap().instructions.is_empty() {
             self.bbs.pop();
         }
@@ -796,6 +807,7 @@ impl Context {
         use regalloc::RegisterAllocationPass;
         use ret_sink::RetSink;
         use simplify::SimplifyCFGPass;
+        use tail_call_elim::TailCallEliminationPass;
         use waffle::bytecode::passes::*;
         let mut pass = RegisterAllocationPass::new();
         let mut bbs = Arc::new(self.bbs.clone());
@@ -833,22 +845,24 @@ impl Context {
                 log::trace!("  0x{:x}: {:?}", i, ins);
             }
         }
+        let mut elim_tail_call = TailCallEliminationPass;
+        elim_tail_call.execute(&mut bbs);
         self.bbs = (*bbs).clone();
         //pass.execute(f: &mut Arc<Function>)
     }
 }
 
-pub fn compile(ast: Vec<Box<Expr>>,no_std: bool) -> Context {
+pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Context {
     let mut ctx = Context::new();
     let ast = Box::new(Expr {
         pos: crate::token::Position::new(0, 0),
         expr: ExprKind::Block(ast.clone()),
     });
     if !no_std {
-        let (r1,r2) = (ctx.new_reg(),ctx.new_reg());
-        let (gid,_) = ctx.global(&Global::Str("__start__".to_owned()));
-        ctx.write(Instruction::LoadStaticById(r1,gid as _));
-        ctx.write(Instruction::Call(r2,r1,0));
+        let (r1, r2) = (ctx.new_reg(), ctx.new_reg());
+        let (gid, _) = ctx.global(&Global::Str("__start__".to_owned()));
+        ctx.write(Instruction::LoadStaticById(r1, gid as _));
+        ctx.write(Instruction::Call(r2, r1, 0));
     }
     ctx.global(&Global::Str("<anonymous>".to_owned()));
     let r = ctx.compile(&ast, false);
