@@ -108,6 +108,7 @@ impl Context {
         let id = self.bbs.len();
         self.bbs.push(BasicBlock {
             instructions: vec![],
+            liveout: vec![],
             index: id,
         });
         self.current_bb += 1;
@@ -491,7 +492,6 @@ impl Context {
                     ));
                 self.compile(if_true, tail);
                 self.write(Instruction::Branch(terminator_bb_id as _));
-
                 self.move_forward();
                 let end_bb_id = self.current_bb;
                 self.bbs[terminator_bb_id]
@@ -555,7 +555,7 @@ impl Context {
             },
 
             ExprKind::While(cond, block) => {
-                let expr_check_bb_id = self.current_bb + 1;
+                /*let expr_check_bb_id = self.current_bb + 1;
                 self.write(Instruction::Branch(expr_check_bb_id as _));
                 self.move_forward();
 
@@ -584,6 +584,45 @@ impl Context {
                         body_begin_id as _,
                         end_bb_id as _,
                     ));
+                0*/
+                self.scoped(|fb| {
+                    let expr_check_bb_id = fb.current_bb as u16 + 1;
+                    fb.write(Instruction::Branch(expr_check_bb_id));
+                    fb.move_forward();
+                    let r = fb.compile(cond, tail);
+                    let break_bb_id = fb.current_bb as u16 + 1;
+                    fb.move_forward();
+                    let body_bb_id = fb.current_bb as u16 + 1;
+                    fb.move_forward();
+
+                    fb.with_lci(
+                        LoopControlInfo {
+                            break_point: break_bb_id,
+                            continue_point: expr_check_bb_id,
+                        },
+                        |fb| fb.compile(block, tail),
+                    );
+
+                    fb.write(Instruction::Branch(expr_check_bb_id));
+                    let end_bb_id = fb.current_bb as u16 + 1;
+                    fb.move_forward();
+                    let end2_bb_id = fb.current_bb as u16 + 1;
+                    fb.move_forward();
+                    let next = fb.current_bb as u16 + 1;
+                    fb.move_forward();
+                    fb.bbs[break_bb_id as usize]
+                        .instructions
+                        .push(Instruction::Branch(end2_bb_id));
+                    fb.bbs[expr_check_bb_id as usize]
+                        .instructions
+                        .push(Instruction::ConditionalBranch(r, body_bb_id, end_bb_id));
+                    fb.bbs[end_bb_id as usize]
+                        .instructions
+                        .push(Instruction::Branch(next));
+                    fb.bbs[end2_bb_id as usize]
+                        .instructions
+                        .push(Instruction::Branch(next));
+                });
                 0
             }
             ExprKind::ArrayIndex(value, index) => {
@@ -612,12 +651,7 @@ impl Context {
                 }
                 let value = self.compile(value, tail);
                 let r = self.new_reg();
-                //if tail {
-                //  self.write(Instruction::TailCall(r, value, args.len() as _));
-                //} else {
                 self.write(Instruction::Call(r, value, args.len() as _));
-                //}
-
                 r
             }
             ExprKind::Unop(op, val) => {
@@ -664,6 +698,7 @@ impl Context {
             g: self.g.clone(),
             bbs: vec![BasicBlock {
                 instructions: vec![],
+                liveout: vec![],
                 index: 0,
             }],
             pos: Vec::new(),
@@ -699,6 +734,8 @@ impl Context {
         }
         ctx.g.borrow_mut().table.push(Global::Func(gid as i32, -1));
         let r = ctx.compile(e, true);
+        ctx.write(Instruction::Branch(ctx.current_bb as u16 + 1));
+        ctx.move_forward();
         if r != 0 {
             ctx.write(Instruction::Return(Some(r)));
         } else {
@@ -708,7 +745,13 @@ impl Context {
         }
         //jlight_vm::runtime::fusion::optimizer::simplify_cfg(&mut ctx.bbs);
 
-        ctx.finalize(true);
+        ctx.finalize(
+            true,
+            vname
+                .clone()
+                .map(|x| x.to_owned())
+                .unwrap_or("<>".to_owned()),
+        );
         //ctx.check_stack(s, "");
 
         ctx.g.borrow_mut().functions.push((
@@ -784,6 +827,7 @@ impl Context {
             nenv: 0,
             bbs: vec![BasicBlock {
                 instructions: vec![],
+                liveout: vec![],
                 index: 0,
             }],
             current_bb: 0,
@@ -798,25 +842,24 @@ impl Context {
         }
     }
 
-    pub fn finalize(&mut self,tail: bool) {
+    pub fn finalize(&mut self, tail: bool, name: String) {
         if self.bbs.last().is_some() && self.bbs.last().unwrap().instructions.is_empty() {
             self.bbs.pop();
         }
         use passes::BytecodePass;
         use peephole::PeepholePass;
-        use regalloc::RegisterAllocationPass;
         use ret_sink::RetSink;
         use simplify::SimplifyCFGPass;
         use tail_call_elim::TailCallEliminationPass;
         use waffle::bytecode::passes::*;
-        let mut pass = RegisterAllocationPass::new();
+        use waffle::bytecode::regalloc::RegisterAllocation;
+        let mut pass = RegisterAllocation::new();
         let mut bbs = Arc::new(self.bbs.clone());
-        let mut simplify = SimplifyCFGPass;
-        simplify.execute(&mut bbs);
+
         if bbs.last().is_some() && bbs.last().unwrap().instructions.is_empty() {
             bbs.pop();
         }
-        log::trace!("Before RA: ");
+        log::trace!("Before RA {}: ", name);
         for (i, bb) in bbs.iter().enumerate() {
             log::trace!("{}:", i);
             for (i, ins) in bb.instructions.iter().enumerate() {
@@ -845,8 +888,10 @@ impl Context {
                 log::trace!("  0x{:x}: {:?}", i, ins);
             }
         }
-        let mut elim_tail_call = TailCallEliminationPass;
-        elim_tail_call.execute(&mut bbs);
+        if tail {
+            let mut elim_tail_call = TailCallEliminationPass;
+            elim_tail_call.execute(&mut bbs);
+        }
         self.bbs = (*bbs).clone();
         //pass.execute(f: &mut Arc<Function>)
     }
@@ -866,6 +911,8 @@ pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Context {
     }
     ctx.global(&Global::Str("<anonymous>".to_owned()));
     let r = ctx.compile(&ast, false);
+    ctx.write(Instruction::Branch(ctx.current_bb as u16 + 1));
+    ctx.move_forward();
     if r != 0 {
         ctx.write(Instruction::Return(Some(r)));
     } else {

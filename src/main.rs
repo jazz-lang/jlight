@@ -29,7 +29,7 @@ use writer::BytecodeWriter;
 #[structopt(name = "jlightc", about = "Compiler")]
 struct Opt {
     #[structopt(
-        long,
+        long = "no-std",
         help = "Do not invoke __start__ function from Waffle runtime to load core modules"
     )]
     no_std: bool,
@@ -41,15 +41,15 @@ struct Opt {
 }
 
 fn main() {
-    //simple_logger::init().unwrap();
     let opt: Opt = Opt::from_args();
+    simple_logger::init().unwrap();
     let mut ast = vec![];
     let no_std = std::env::var("NO_STD_BUILD").is_ok();
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
     p.parse().unwrap();
     let mut m = compile(ast, no_std || opt.no_std);
-    m.finalize(false);
+    m.finalize(false, "main".to_owned());
     let mut module = module_from_ctx(&m);
     disassemble_module(&module);
     let mut writer = BytecodeWriter { bytecode: vec![] };
