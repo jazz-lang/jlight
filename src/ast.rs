@@ -47,8 +47,6 @@ pub enum ExprKind {
     Return(Option<Box<Expr>>),
     Call(Box<Expr>, Vec<Box<Expr>>),
     Nil,
-    Break,
-    Continue,
     Throw(Box<Expr>),
     ConstBool(bool),
     Array(Vec<Box<Expr>>),

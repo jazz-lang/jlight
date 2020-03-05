@@ -363,17 +363,9 @@ impl Context {
 
     pub fn compile(&mut self, e: &Expr, tail: bool) -> u16 {
         match &e.expr {
-            ExprKind::Break => {
-                self.write_break();
-                0
-            }
             ExprKind::Throw(e) => {
                 let r = self.compile(e, tail);
                 self.write(Instruction::Throw(r));
-                0
-            }
-            ExprKind::Continue => {
-                self.write_continue();
                 0
             }
             ExprKind::Block(v) => {

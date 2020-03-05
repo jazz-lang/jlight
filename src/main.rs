@@ -23,6 +23,8 @@ use jlight::reader::*;
 use std::io::Write;
 use std::path::PathBuf;
 use structopt::StructOpt;
+use waffle::runtime::cell::*;
+use waffle::bytecode::passes::simple_inlining::*;
 use waffle::bytecode::*;
 use writer::BytecodeWriter;
 #[derive(Debug, StructOpt)]
@@ -51,6 +53,13 @@ fn main() {
     let mut m = compile(ast, no_std || opt.no_std);
     m.finalize(false, "main".to_owned());
     let mut module = module_from_ctx(&m);
+    /*for global in module.globals.iter().copied() {
+        if global.is_cell() {
+            if let CellValue::Function(ref mut f) = global.as_cell().get_mut().value {
+                do_inlining(f,&module);
+            }
+        }
+    }*/
     disassemble_module(&module);
     let mut writer = BytecodeWriter { bytecode: vec![] };
     writer.write_module(&mut module);

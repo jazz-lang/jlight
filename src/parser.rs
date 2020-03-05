@@ -129,8 +129,6 @@ impl<'a> Parser<'a> {
             TokenKind::LBrace => self.parse_block(),
             TokenKind::If => self.parse_if(),
             TokenKind::While => self.parse_while(),
-            TokenKind::Break => self.parse_break(),
-            TokenKind::Continue => self.parse_continue(),
             TokenKind::Return => self.parse_return(),
             TokenKind::Throw => self.parse_throw(),
             _ => self.parse_binary(0),
@@ -140,15 +138,6 @@ impl<'a> Parser<'a> {
     fn parse_self(&mut self) -> EResult {
         let pos = self.expect_token(TokenKind::This)?.position;
         Ok(expr!(ExprKind::This, pos))
-    }
-
-    fn parse_break(&mut self) -> EResult {
-        let pos = self.expect_token(TokenKind::Break)?.position;
-        Ok(expr!(ExprKind::Break, pos))
-    }
-    fn parse_continue(&mut self) -> EResult {
-        let pos = self.expect_token(TokenKind::Continue)?.position;
-        Ok(expr!(ExprKind::Continue, pos))
     }
 
     fn parse_throw(&mut self) -> EResult {
