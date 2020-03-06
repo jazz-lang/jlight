@@ -153,31 +153,6 @@ impl<'a> Parser<'a> {
         Ok(expr!(ExprKind::While(cond, block), pos))
     }
 
-    fn parse_match(&mut self) -> EResult {
-        let pos = self.expect_token(TokenKind::Match)?.position;
-        let value = self.parse_expression()?;
-        self.expect_token(TokenKind::LBrace)?;
-        let mut data = vec![];
-        let mut or = None;
-        while !self.token.is(TokenKind::RBrace) && !self.token.is_eof() {
-            if self.token.is(TokenKind::Underscore) {
-                self.expect_token(TokenKind::Underscore)?;
-                self.expect_token(TokenKind::Arrow)?;
-                let expr = self.parse_expression()?;
-                or = Some(expr);
-                continue;
-            }
-            let cond = self.parse_expression()?;
-            self.expect_token(TokenKind::Arrow)?;
-            let expr = self.parse_expression()?;
-            data.push((cond, expr));
-        }
-
-        self.expect_token(TokenKind::RBrace)?;
-
-        Ok(expr!(ExprKind::Match(value, data, or), pos))
-    }
-
     fn parse_if(&mut self) -> EResult {
         let pos = self.expect_token(TokenKind::If)?.position;
         let cond = self.parse_expression()?;
@@ -387,6 +362,49 @@ impl<'a> Parser<'a> {
         let block = self.parse_expression()?;
         Ok(expr!(ExprKind::Lambda(params, block), tok.position))
     }
+    fn parse_match(&mut self) -> EResult {
+        let pos = self.expect_token(TokenKind::Match)?.position;
+        let e = self.parse_expression()?;
+        self.expect_token(TokenKind::LBrace)?;
+        let list = self.parse_comma_list(TokenKind::RBrace, |parser: &mut Parser| {
+            let pat = parser.parse_pattern()?;
+            let when_clause = if parser.token.is(TokenKind::When) {
+                parser.advance_token()?;
+                Some(parser.parse_expression()?)
+            } else {
+                None
+            };
+            let expr = parser.parse_expression()?;
+            Ok((pat, when_clause, expr))
+        })?;
+
+        Ok(Expr {
+            expr: ExprKind::Match(e, list),
+            pos,
+        })
+        .map(|x| Box::new(x))
+    }
+
+    fn parse_pattern(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        match self.token.kind {
+            TokenKind::LitInt { .. } => self.plit_int(),
+            TokenKind::LitFloat(_) => self.plit_float(),
+            TokenKind::String(_) => self.plit_str(),
+            TokenKind::Identifier(_) => self.pident(),
+            TokenKind::LBracket => self.parray(),
+            TokenKind::LBrace => self.precord(),
+            TokenKind::DotDot => {
+                let pos = self.advance_token()?.position;
+                Ok(Pattern {
+                    decl: PatternDecl::Rest,
+                    pos: pos,
+                })
+                .map(|x| Box::new(x))
+            }
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn parse_factor(&mut self) -> EResult {
         let expr = match self.token.kind {
             TokenKind::Fun => self.parse_function(),
@@ -476,5 +494,96 @@ impl<'a> Parser<'a> {
         let ident = self.expect_identifier()?;
 
         Ok(expr!(ExprKind::Ident(ident), pos))
+    }
+    fn plit_int(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let tok = self.advance_token()?;
+        let pos = tok.position;
+        if let TokenKind::LitInt(i, _, _) = tok.kind {
+            Ok(Box::new(Pattern {
+                decl: PatternDecl::ConstInt(i.parse::<i64>().unwrap()),
+                pos,
+            }))
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn plit_char(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let tok = self.advance_token()?;
+        let pos = tok.position;
+        if let TokenKind::LitChar(c) = tok.kind {
+            Ok(Pattern {
+                decl: PatternDecl::ConstChar(c),
+                pos,
+            })
+            .map(|x| Box::new(x))
+        } else {
+            unreachable!()
+        }
+    }
+    fn plit_float(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let tok = self.advance_token()?;
+        let pos = tok.position;
+        if let TokenKind::LitFloat(c) = tok.kind {
+            Ok(Pattern {
+                decl: PatternDecl::ConstFloat(c.parse().unwrap()),
+                pos,
+            })
+            .map(|x| Box::new(x))
+        } else {
+            unreachable!()
+        }
+    }
+    fn plit_str(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let tok = self.advance_token()?;
+        let pos = tok.position;
+        if let TokenKind::String(s) = tok.kind {
+            Ok(Pattern {
+                decl: PatternDecl::ConstStr(s),
+                pos,
+            })
+            .map(|x| Box::new(x))
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn pident(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let pos = self.token.position;
+        let ident = self.expect_identifier()?;
+
+        Ok(Pattern {
+            decl: PatternDecl::Ident(ident),
+            pos: pos,
+        })
+        .map(|x| Box::new(x))
+    }
+
+    fn parray(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let pos = self.token.position;
+        self.expect_token(TokenKind::LBracket)?;
+        let list = self.parse_comma_list(TokenKind::RBracket, |parser| parser.parse_pattern())?;
+
+        Ok(Pattern {
+            decl: PatternDecl::Array(list),
+            pos,
+        })
+        .map(|x| Box::new(x))
+    }
+
+    fn precord(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let pos = self.expect_token(TokenKind::LBrace)?.position;
+        let record = self.parse_comma_list(TokenKind::LBracket, |parser| {
+            let name = parser.expect_identifier()?;
+            parser.expect_token(TokenKind::Colon)?;
+            let pattern = parser.parse_pattern()?;
+            Ok((name, pattern))
+        })?;
+
+        Ok(Pattern {
+            decl: PatternDecl::Record(record),
+            pos,
+        })
+        .map(|x| Box::new(x))
     }
 }

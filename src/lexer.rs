@@ -44,9 +44,8 @@ impl Lexer {
             "else" => TokenKind::Else,
             "in" => TokenKind::In,
             "loop" => TokenKind::Loop,
-            "break" => TokenKind::Break,
             "match" => TokenKind::Match,
-            "continue" => TokenKind::Continue,
+            "when" => TokenKind::When,
             "const" => TokenKind::Const,
             "return" => TokenKind::Return,
             "true" => TokenKind::True,
@@ -286,7 +285,14 @@ impl Lexer {
                     TokenKind::Colon
                 }
             }
-            '.' => TokenKind::Dot,
+            '.' => {
+                if nch == '.' {
+                    self.read_char();
+                    TokenKind::DotDot
+                } else {
+                    TokenKind::Dot
+                }
+            }
             '=' => {
                 if nch == '=' {
                     self.read_char();

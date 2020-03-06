@@ -17,6 +17,24 @@
 
 use crate::token::Position;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatternDecl {
+    Ident(String),
+    ConstInt(i64),
+    ConstFloat(f64),
+    ConstChar(char),
+    ConstStr(String),
+    Record(Vec<(String, Box<Pattern>)>),
+    Array(Vec<Box<Pattern>>),
+    Rest,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pattern {
+    pub decl: PatternDecl,
+    pub pos: Position,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct Expr {
     pub pos: Position,
@@ -33,7 +51,7 @@ pub enum ExprKind {
     Function(Option<String>, Vec<String>, Box<Expr>),
     Class(String, Box<Expr>, Option<Box<Expr>>),
     Lambda(Vec<String>, Box<Expr>),
-    Match(Box<Expr>, Vec<(Box<Expr>, Box<Expr>)>, Option<Box<Expr>>),
+    Match(Box<Expr>, Vec<(Box<Pattern>, Option<Box<Expr>>, Box<Expr>)>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     ConstInt(i64),
     ConstChar(char),

@@ -18,6 +18,7 @@
 pub mod ast;
 pub mod codegen;
 pub mod lexer;
+pub mod match_;
 pub mod msg;
 pub mod parser;
 pub mod reader;

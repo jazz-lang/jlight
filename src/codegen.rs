@@ -15,20 +15,20 @@
 *   limitations under the License.
 */
 use crate::ast::*;
+use crate::msg::*;
 use basicblock::*;
 use cell::*;
-use hashlink::LinkedHashMap;
+use hashlink::{LinkedHashMap, LinkedHashSet};
+use instruction::*;
 use module::*;
 use runtime::*;
-use value::*;
-use waffle::runtime;
-
-use instruction::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::rc::Rc;
+use value::*;
 use waffle::bytecode::*;
+use waffle::runtime;
 use waffle::util::arc::Arc;
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub enum Global {
@@ -65,6 +65,7 @@ pub struct Context {
     pub g: Rc<RefCell<Globals>>,
     pub bbs: Vec<BasicBlock>,
     pub current_bb: usize,
+    pub immutable: LinkedHashSet<String>,
     pub locals: LinkedHashMap<String, i32>,
     pub env: LinkedHashMap<String, i32>,
     pub labels: HashMap<String, Option<u32>>,
@@ -183,48 +184,51 @@ impl Context {
     pub fn write(&mut self, ins: Instruction) {
         self.get_current_bb().instructions.push(ins);
     }
-    pub fn access_set(&mut self, acc: Access, r: u16) -> u16 {
+    pub fn access_set(&mut self, acc: Access, r: u16) -> Result<u16,MsgWithPos> {
         match acc {
             Access::Env(n) => {
                 self.write(Instruction::StoreUpvalue(r, n as _));
-                return r;
+                return Ok(r);
             }
-            Access::Stack(_name, l) => {
-                //let l = self.new_reg();
+            Access::Stack(name, l) => {
+                if self.immutable.contains(&name) {
+                    panic!("immutable");
+                }
+                let l = self.new_reg();
                 self.write(Instruction::Move(l as _, r));
-                //self.locals.insert(name, l as _);
-                return r as _;
+                self.locals.insert(name, l as _);
+                return Ok(l as _);
             }
             Access::Global(_, _, _) => unimplemented!(),
             Access::Field(obj, f) => {
                 let (gid, _) = self.global(&Global::Str(f.to_owned()));
-                let obj = self.compile(&*obj, false);
+                let obj = self.compile(&*obj, false)?;
                 //self.write(Instruction::LoadConst(sr, gid as _));
                 self.write(Instruction::StoreById(obj, r, gid as _));
-                return r;
+                return Ok(r);
             }
             Access::Index(_) => unimplemented!(),
             Access::Array(value, index) => {
-                let value = self.compile(&value, false);
-                let index = self.compile(&index, false);
+                let value = self.compile(&value, false)?;
+                let index = self.compile(&index, false)?;
                 self.write(Instruction::StoreByValue(value, index, r));
-                return r;
+                return Ok(r);
             }
             //Access::This => self.write(Opcode::SetThis),
             //Access::Array => self.write(Opcode::SetArray),
             _ => unimplemented!(),
         }
     }
-    pub fn access_get(&mut self, acc: Access) -> u16 {
+    pub fn access_get(&mut self, acc: Access) -> Result<u16,MsgWithPos> {
         let r = self.new_reg();
         match acc {
             Access::Env(i) => {
                 self.write(Instruction::LoadUpvalue(r, i as _));
-                return r;
+                return Ok(r);
             }
             Access::Stack(_, l) => {
                 self.write(Instruction::Move(r, l as _));
-                return r;
+                return Ok(r);
             }
             Access::Global(x, n, name) => {
                 if !n {
@@ -233,25 +237,25 @@ impl Context {
                     let (gid, _) = self.global(&Global::Str(name));
                     self.write(Instruction::LoadStaticById(r, gid as _));
                 }
-                return r;
+                return Ok(r);
             }
             Access::Field(e, f) => {
                 let (gid, _) = self.global(&Global::Str(f));
                 //let g = self.new_reg();
                 //self.write(Instruction::LoadConst(g as _, gid as _));
-                let o = self.compile(&*e, false);
+                let o = self.compile(&*e, false)?;
                 self.write(Instruction::LoadById(r as _, o as _, gid as _));
-                return r;
+                return Ok(r);
             }
             Access::This => {
                 self.write(Instruction::LoadThis(r));
-                return r;
+                return Ok(r);
             }
             Access::Array(value, index) => {
-                let value = self.compile(&value, false);
-                let index = self.compile(&index, false);
+                let value = self.compile(&value, false)?;
+                let index = self.compile(&index, false)?;
                 self.write(Instruction::LoadByValue(r, value, index));
-                return r;
+                return Ok(r);
             }
 
             _ => unimplemented!(),
@@ -285,152 +289,157 @@ impl Context {
             _ => unimplemented!(),
         }
     }
-    pub fn compile_binop(&mut self, op: &str, e1: &Expr, e2: &Expr, tail: bool) -> u16 {
+    pub fn compile_binop(&mut self, op: &str, e1: &Expr, e2: &Expr, tail: bool) -> Result<u16,MsgWithPos> {
         match op {
             "==" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Equal, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "!=" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::NotEqual, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             ">" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Greater, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             ">=" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::GreaterOrEqual, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "<" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Less, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "<=" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::LessOrEqual, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "+" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Add, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "-" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Sub, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "/" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Div, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             "*" => {
-                let r1 = self.compile(e1, tail);
-                let r2 = self.compile(e2, tail);
+                let r1 = self.compile(e1, tail)?;
+                let r2 = self.compile(e2, tail)?;
                 let r3 = self.new_reg();
                 self.write(Instruction::Binary(BinOp::Mul, r3, r1, r2));
-                r3
+                Ok(r3)
             }
             _ => unimplemented!(),
         }
     }
 
-    pub fn compile(&mut self, e: &Expr, tail: bool) -> u16 {
+    pub fn compile(&mut self, e: &Expr, tail: bool) -> Result<u16,MsgWithPos> {
         match &e.expr {
             ExprKind::Throw(e) => {
-                let r = self.compile(e, tail);
+                let r = self.compile(e, tail)?;
                 self.write(Instruction::Throw(r));
-                0
+                Ok(0)
             }
             ExprKind::Block(v) => {
                 if v.is_empty() {
                     let r = self.new_reg();
                     self.write(Instruction::LoadNull(r));
-                    return r;
+                    return Ok(r);
                 }
-                let last = self.scoped(|ctx| {
+                let last = self.scoped::<Result<Option<u16>,MsgWithPos>,_>(|ctx| {
                     let expr_next_bb = ctx.current_bb + 1;
                     ctx.write(Instruction::Branch(expr_next_bb as _));
                     ctx.move_forward();
                     let mut last = None;
                     for x in v.iter() {
-                        last = Some(ctx.compile(x, tail));
+                        let r = ctx.compile(x, tail)?;
+                        last = Some(r);
                     }
                     let expr_next_bb = ctx.current_bb + 1;
                     ctx.write(Instruction::Branch(expr_next_bb as _));
                     ctx.move_forward();
-                    last
-                });
+                    Ok(last)
+                })?;
                 match last {
-                    Some(r) if r != 0 => r,
+                    Some(r) if r != 0 => Ok(r),
                     _ => {
                         let x = self.new_reg();
                         self.write(Instruction::LoadNull(x));
-                        x
+                        Ok(x)
                     }
                 }
             }
             ExprKind::BinOp(e1, op, e2) => self.compile_binop(op, e1, e2, tail),
             ExprKind::ConstInt(x) => {
                 let r = self.new_reg();
+                if *x >= std::i32::MAX as i64 {
+                    self.write(Instruction::LoadNumber(r,f64::to_bits(*x as f64)));
+                    return Ok(r)
+                }
                 self.write(Instruction::LoadInt(r, *x as i32));
-                r
+                Ok(r)
             }
             ExprKind::ConstFloat(x) => {
                 let r = self.new_reg();
                 self.write(Instruction::LoadNumber(r, x.to_bits()));
-                r
+                Ok(r)
             }
             ExprKind::ConstStr(s) => {
                 let (gid, _) = self.global(&Global::Str(s.to_owned()));
                 let g = self.new_reg();
                 self.write(Instruction::LoadConst(g, gid as _));
-                g
+                Ok(g)
             }
             ExprKind::Return(e) => match e {
                 Some(e) => {
-                    let r = self.compile(e, true);
+                    let r = self.compile(e, true)?;
                     self.write(Instruction::Return(Some(r)));
                     self.move_forward();
-                    r
+                    Ok(r)
                 }
                 _ => {
                     self.write(Instruction::Return(None));
                     self.move_forward();
-                    0
+                    Ok(0)
                 }
             },
 
-            ExprKind::Var(_, name, init) => {
+            ExprKind::Var(mutable, name, init) => {
                 let r = match init {
                     Some(val) => {
-                        let x = self.compile(&**val, tail);
+                        let x = self.compile(&**val, tail)?;
                         let r = self.new_reg();
                         self.write(Instruction::Move(r, x));
                         r
@@ -441,13 +450,16 @@ impl Context {
                         r
                     }
                 };
+                if self.immutable.contains(name) && *mutable {
+                    self.immutable.remove(name);
+                }
                 self.locals.insert(name.to_owned(), r as _);
 
-                r
+                Ok(r)
             }
             ExprKind::Assign(lhs, rhs) => {
                 let a = self.compile_access(&lhs.expr);
-                let r = self.compile(rhs, false);
+                let r = self.compile(rhs, false)?;
                 self.access_set(a, r)
             }
             ExprKind::If(cond, if_true, if_false) => {
@@ -455,14 +467,16 @@ impl Context {
                 self.move_forward();
                 let terminator_bb_id = self.current_bb;
                 self.move_forward();
-                let r = self.compile(cond, tail);
+                let r = self.compile(cond, tail)?;
                 let br_begin = self.current_bb;
                 let else_begin;
+                let ret = self.new_reg();
                 if let Some(if_false) = if_false {
                     self.move_forward();
                     else_begin = self.current_bb;
-                    let _last = self.compile(if_false, tail);
-                    //self.write(Instruction::Move(ret, last));
+                    let last = self.compile(if_false, tail)?;
+                    self.write(Instruction::Move(ret, last));
+
                     self.get_current_bb()
                         .instructions
                         .push(Instruction::Branch(terminator_bb_id as _));
@@ -482,15 +496,16 @@ impl Context {
                         current_bb as _,
                         else_begin as _,
                     ));
-                self.compile(if_true, tail);
+                let last = self.compile(if_true, tail)?;
+                self.write(Instruction::Move(ret,last));
                 self.write(Instruction::Branch(terminator_bb_id as _));
                 self.move_forward();
                 let end_bb_id = self.current_bb;
                 self.bbs[terminator_bb_id]
                     .instructions
                     .push(Instruction::Branch(end_bb_id as _));
-                //ret
-                0
+                Ok(ret)
+
             }
             ExprKind::Ident(s) => {
                 let s: &str = s;
@@ -499,7 +514,7 @@ impl Context {
                     let r = i as u16;
                     let new_r = self.new_reg();
                     self.write(Instruction::Move(new_r, r));
-                    return new_r;
+                    return Ok(new_r);
                 } else if self.env.contains_key(s) {
                     self.nenv += 1;
                     let r = self.new_reg();
@@ -512,7 +527,7 @@ impl Context {
                         *self.used_upvars.get(s).unwrap() as u16
                     };
                     self.write(Instruction::LoadUpvalue(r, pos as _));
-                    return r;
+                    return Ok(r);
                 } else {
                     let (g, n) = self.global2(&Global::Var(s.to_owned()));
                     let r = if !n {
@@ -525,75 +540,45 @@ impl Context {
                         self.write(Instruction::LoadStaticById(r2, s as _));
                         r2
                     };
-                    return r;
+                    return Ok(r);
                 }
             }
             ExprKind::Function(name, params, body) => {
-                let r = self.compile_function(params, body, name.clone());
-                return r;
+                let r = self.compile_function(params, body, name.clone())?;
+                return Ok(r);
             }
             ExprKind::New(expr) => match &expr.expr {
                 ExprKind::Call(value, args) => {
                     for arg in args.iter().rev() {
-                        let r = self.compile(arg, tail);
+                        let r = self.compile(arg, tail)?;
                         self.write(Instruction::Push(r));
                     }
-                    let value = self.compile(value, tail);
+                    let value = self.compile(value, tail)?;
                     let r = self.new_reg();
                     self.write(Instruction::New(r, value, args.len() as _));
-                    r
+                    Ok(r)
                 }
                 _ => panic!("Call expected"),
             },
 
             ExprKind::While(cond, block) => {
-                /*let expr_check_bb_id = self.current_bb + 1;
-                self.write(Instruction::Branch(expr_check_bb_id as _));
-                self.move_forward();
-
-                let r = self.compile(cond, tail);
-                let break_point_bb = self.current_bb + 1;
-                self.move_forward();
-                let body_begin_id = self.current_bb + 1;
-                self.move_forward();
-                let _ = self.with_lci(
-                    LoopControlInfo {
-                        break_point: break_point_bb as _,
-                        continue_point: expr_check_bb_id as _,
-                    },
-                    |ctx| ctx.scoped(|ctx| ctx.compile(block, tail)),
-                );
-                self.write(Instruction::Branch(expr_check_bb_id as _));
-                let end_bb_id = self.current_bb + 1;
-                self.move_forward();
-                self.bbs[break_point_bb]
-                    .instructions
-                    .push(Instruction::Branch(end_bb_id as _));
-                self.bbs[expr_check_bb_id]
-                    .instructions
-                    .push(Instruction::ConditionalBranch(
-                        r,
-                        body_begin_id as _,
-                        end_bb_id as _,
-                    ));
-                0*/
-                self.scoped(|fb| {
+                let r = self.scoped::<Result<u16,MsgWithPos>,_>(|fb| {
                     let expr_check_bb_id = fb.current_bb as u16 + 1;
                     fb.write(Instruction::Branch(expr_check_bb_id));
                     fb.move_forward();
-                    let r = fb.compile(cond, tail);
+                    let r = fb.compile(cond, tail)?;
                     let break_bb_id = fb.current_bb as u16 + 1;
                     fb.move_forward();
                     let body_bb_id = fb.current_bb as u16 + 1;
                     fb.move_forward();
 
-                    fb.with_lci(
+                    let last = fb.with_lci(
                         LoopControlInfo {
                             break_point: break_bb_id,
                             continue_point: expr_check_bb_id,
                         },
                         |fb| fb.compile(block, tail),
-                    );
+                    )?;
 
                     fb.write(Instruction::Branch(expr_check_bb_id));
                     let end_bb_id = fb.current_bb as u16 + 1;
@@ -614,40 +599,41 @@ impl Context {
                     fb.bbs[end2_bb_id as usize]
                         .instructions
                         .push(Instruction::Branch(next));
-                });
-                0
+                    Ok(last)
+                })?;
+                Ok(r)
             }
             ExprKind::ArrayIndex(value, index) => {
-                let value = self.compile(value, tail);
-                let index = self.compile(index, tail);
+                let value = self.compile(value, tail)?;
+                let index = self.compile(index, tail)?;
                 let r = self.new_reg();
                 self.write(Instruction::LoadByValue(r, value, index));
-                r
+                Ok(r)
             }
             ExprKind::Call(value, args) => {
                 for arg in args.iter().rev() {
-                    let r = self.compile(arg, tail);
+                    let r = self.compile(arg, tail)?;
                     self.write(Instruction::Push(r));
                 }
                 match &value.expr {
                     ExprKind::Access(object, fields) => {
-                        let this = self.compile(object, tail);
+                        let this = self.compile(object, tail)?;
                         let field = self.new_reg();
                         let (s, _) = self.global(&Global::Str(fields.to_owned()));
                         self.write(Instruction::LoadById(field, this, s as _));
                         let r = self.new_reg();
                         self.write(Instruction::VirtCall(r, field, this, args.len() as _));
-                        return r;
+                        return Ok(r);
                     }
                     _ => (),
                 }
-                let value = self.compile(value, tail);
+                let value = self.compile(value, tail)?;
                 let r = self.new_reg();
                 self.write(Instruction::Call(r, value, args.len() as _));
-                r
+                Ok(r)
             }
             ExprKind::Unop(op, val) => {
-                let r = self.compile(val, tail);
+                let r = self.compile(val, tail)?;
                 let dest = self.new_reg();
                 let op: &str = op;
                 match op {
@@ -655,7 +641,7 @@ impl Context {
                     "!" => self.write(Instruction::Unary(UnaryOp::Not, dest, r)),
                     _ => self.write(Instruction::Move(dest, r)),
                 }
-                dest
+                Ok(dest)
             }
             ExprKind::Lambda(arguments, body) => self.compile_function(arguments, body, None),
             ExprKind::Access(f, s) => {
@@ -665,7 +651,7 @@ impl Context {
             ExprKind::This => {
                 let r = self.new_reg();
                 self.write(Instruction::LoadThis(r));
-                r
+                Ok(r)
             }
             ExprKind::ConstBool(val) => {
                 let r = self.new_reg();
@@ -674,7 +660,7 @@ impl Context {
                 } else {
                     self.write(Instruction::LoadFalse(r));
                 }
-                r
+                Ok(r)
             }
             expr => panic!("{:?}", expr),
         }
@@ -685,8 +671,9 @@ impl Context {
         params: &[String],
         e: &Box<Expr>,
         vname: Option<String>,
-    ) -> u16 {
+    ) -> Result<u16,MsgWithPos> {
         let mut ctx = Context {
+            immutable: LinkedHashSet::new(),
             g: self.g.clone(),
             bbs: vec![BasicBlock {
                 instructions: vec![],
@@ -725,7 +712,7 @@ impl Context {
                 .insert(Global::Var(vname.as_ref().unwrap().to_owned()), gid as i32);
         }
         ctx.g.borrow_mut().table.push(Global::Func(gid as i32, -1));
-        let r = ctx.compile(e, true);
+        let r = ctx.compile(e, true)?;
         ctx.write(Instruction::Branch(ctx.current_bb as u16 + 1));
         ctx.move_forward();
         if r != 0 {
@@ -763,11 +750,11 @@ impl Context {
             self.write(Instruction::LoadConst(r, gid as _));
 
             self.write(Instruction::MakeEnv(r, (ctx.used_upvars.len()) as u16));
-            return r;
+            return Ok(r);
         } else {
             let r = self.new_reg();
             self.write(Instruction::LoadConst(r, gid as _));
-            return r;
+            return Ok(r);
         }
     }
     fn ident(&mut self, name: &str) -> u16 {
@@ -815,6 +802,7 @@ impl Context {
             g: Rc::new(RefCell::new(g)),
             used_upvars: LinkedHashMap::new(),
             locals: LinkedHashMap::new(),
+            immutable: LinkedHashSet::new(),
             limit: 0,
             nenv: 0,
             bbs: vec![BasicBlock {
@@ -834,62 +822,11 @@ impl Context {
         }
     }
 
-    pub fn finalize(&mut self, tail: bool, name: String) {
-        if self.bbs.last().is_some() && self.bbs.last().unwrap().instructions.is_empty() {
-            self.bbs.pop();
-        }
-        use passes::BytecodePass;
-        use peephole::PeepholePass;
-        use ret_sink::RetSink;
-        use simplify::SimplifyCFGPass;
-        use tail_call_elim::TailCallEliminationPass;
-        use waffle::bytecode::passes::*;
-        use waffle::bytecode::regalloc::RegisterAllocation;
-        let mut pass = RegisterAllocation::new();
-        let mut bbs = Arc::new(self.bbs.clone());
-
-        if bbs.last().is_some() && bbs.last().unwrap().instructions.is_empty() {
-            bbs.pop();
-        }
-        log::trace!("Before RA {}: ", name);
-        for (i, bb) in bbs.iter().enumerate() {
-            log::trace!("{}:", i);
-            for (i, ins) in bb.instructions.iter().enumerate() {
-                log::trace!("  0x{:x}: {:?}", i, ins);
-            }
-        }
-        pass.execute(&mut bbs);
-
-        let mut ret_sink = RetSink;
-        ret_sink.execute(&mut bbs);
-        let mut simplify = SimplifyCFGPass;
-        simplify.execute(&mut bbs);
-        let mut peephole = PeepholePass;
-        log::trace!("Before peephole: ");
-        for (i, bb) in bbs.iter().enumerate() {
-            log::trace!("{}:", i);
-            for (i, ins) in bb.instructions.iter().enumerate() {
-                log::trace!("  0x{:x}: {:?}", i, ins);
-            }
-        }
-        peephole.execute(&mut bbs);
-        log::trace!("After peephole:");
-        for (i, bb) in bbs.iter().enumerate() {
-            log::trace!("{}:", i);
-            for (i, ins) in bb.instructions.iter().enumerate() {
-                log::trace!("  0x{:x}: {:?}", i, ins);
-            }
-        }
-        if tail {
-            let mut elim_tail_call = TailCallEliminationPass;
-            elim_tail_call.execute(&mut bbs);
-        }
-        self.bbs = (*bbs).clone();
-        //pass.execute(f: &mut Arc<Function>)
+    pub fn finalize(&mut self, _tail: bool, _name: String) {
     }
 }
 
-pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Context {
+pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Result<Context,MsgWithPos> {
     let mut ctx = Context::new();
     let ast = Box::new(Expr {
         pos: crate::token::Position::new(0, 0),
@@ -902,7 +839,7 @@ pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Context {
         ctx.write(Instruction::Call(r2, r1, 0));
     }
     ctx.global(&Global::Str("<anonymous>".to_owned()));
-    let r = ctx.compile(&ast, false);
+    let r = ctx.compile(&ast, false)?;
     ctx.write(Instruction::Branch(ctx.current_bb as u16 + 1));
     ctx.move_forward();
     if r != 0 {
@@ -913,7 +850,7 @@ pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Context {
         ctx.write(Instruction::Return(Some(r)));
     }
     ctx.global(&Global::Str("main".to_owned()));
-    ctx
+    Ok(ctx)
 }
 
 pub fn module_from_ctx(context: &Context) -> Arc<Module> {

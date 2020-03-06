@@ -23,9 +23,9 @@ use jlight::reader::*;
 use std::io::Write;
 use std::path::PathBuf;
 use structopt::StructOpt;
-use waffle::runtime::cell::*;
 use waffle::bytecode::passes::simple_inlining::*;
 use waffle::bytecode::*;
+use waffle::runtime::cell::*;
 use writer::BytecodeWriter;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "jlightc", about = "Compiler")]
@@ -50,16 +50,13 @@ fn main() {
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
     p.parse().unwrap();
-    let mut m = compile(ast, no_std || opt.no_std);
+    let mut m = compile(ast, no_std || opt.no_std).unwrap();
     m.finalize(false, "main".to_owned());
     let mut module = module_from_ctx(&m);
-    /*for global in module.globals.iter().copied() {
-        if global.is_cell() {
-            if let CellValue::Function(ref mut f) = global.as_cell().get_mut().value {
-                do_inlining(f,&module);
-            }
-        }
-    }*/
+    println!("before optimizations: ");
+    disassemble_module(&module);
+    prelink_module(&module,OptLevel::Fast);
+    println!("after:");
     disassemble_module(&module);
     let mut writer = BytecodeWriter { bytecode: vec![] };
     writer.write_module(&mut module);
