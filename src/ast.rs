@@ -26,7 +26,18 @@ pub enum PatternDecl {
     ConstStr(String),
     Record(Vec<(String, Option<Box<Pattern>>)>),
     Array(Vec<Box<Pattern>>),
+    Pass,
     Rest,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Arg {
+    /// `function foo (x,y / *Ident*/ )`
+    Ident(bool, String),
+    /// `function foo ( {x,y} /* Record */ )`
+    Record(Vec<String>),
+    /// `function foo ( [x,y] /* Array */ )`
+    Array(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,9 +59,9 @@ pub enum ExprKind {
     Unop(String, Box<Expr>),
     Access(Box<Expr>, String),
     Ident(String),
-    Function(Option<String>, Vec<String>, Box<Expr>),
+    Function(Option<String>, Vec<Arg>, Box<Expr>),
     Class(String, Box<Expr>, Option<Box<Expr>>),
-    Lambda(Vec<String>, Box<Expr>),
+    Lambda(Vec<Arg>, Box<Expr>),
     Match(Box<Expr>, Vec<(Box<Pattern>, Option<Box<Expr>>, Box<Expr>)>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     ConstInt(i64),

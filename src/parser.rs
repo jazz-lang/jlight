@@ -82,11 +82,6 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_function_param(&mut self) -> Result<String, MsgWithPos> {
-        let name = self.expect_identifier()?;
-        Ok(name)
-    }
-
     fn parse_function(&mut self) -> EResult {
         let pos = self.expect_token(TokenKind::Fun)?.position;
         let name = if let TokenKind::Identifier(_) = &self.token.kind {
@@ -95,7 +90,7 @@ impl<'a> Parser<'a> {
             None
         };
         self.expect_token(TokenKind::LParen)?;
-        let params = if self.token.kind == TokenKind::RParen {
+        /* let params = if self.token.kind == TokenKind::RParen {
             vec![]
         } else {
             let mut tmp = vec![];
@@ -107,9 +102,38 @@ impl<'a> Parser<'a> {
             }
             tmp
         };
-        self.expect_token(TokenKind::RParen)?;
+        self.expect_token(TokenKind::RParen)?;*/
+        let params = self.parse_comma_list(TokenKind::RParen, |parser| parser.parse_arg())?;
         let block = self.parse_block()?;
         Ok(expr!(ExprKind::Function(name, params, block), pos))
+    }
+
+    fn parse_arg(&mut self) -> Result<Arg, MsgWithPos> {
+        let pos = self.token.position;
+        let tok = self.token.kind.name();
+        match self.token.kind {
+            TokenKind::Var => {
+                self.advance_token()?;
+                Ok(Arg::Ident(true, self.expect_identifier()?))
+            }
+            TokenKind::Identifier { .. } => Ok(Arg::Ident(false, self.expect_identifier()?)),
+            TokenKind::LBrace => {
+                self.expect_token(TokenKind::LBrace)?;
+                let list: Vec<String> =
+                    self.parse_comma_list(TokenKind::RBrace, |parser| parser.expect_identifier())?;
+                Ok(Arg::Record(list))
+            }
+            TokenKind::LBracket => {
+                self.expect_token(TokenKind::LBracket)?;
+                let list: Vec<String> = self
+                    .parse_comma_list(TokenKind::RBracket, |parser| parser.expect_identifier())?;
+                Ok(Arg::Array(list))
+            }
+            _ => Err(MsgWithPos::new(
+                pos,
+                Msg::Custom(format!("unexpected token '{}' in argument position.", tok,)),
+            )),
+        }
     }
 
     fn parse_let(&mut self) -> EResult {
@@ -368,7 +392,7 @@ impl<'a> Parser<'a> {
         let params = if tok.kind == TokenKind::Or {
             vec![]
         } else {
-            self.parse_comma_list(TokenKind::BitOr, |f| f.parse_function_param())?
+            self.parse_comma_list(TokenKind::BitOr, |f| f.parse_arg())?
         };
 
         let block = self.parse_expression()?;
@@ -398,13 +422,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_pattern(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
+        let pos = self.token.position;
         match self.token.kind {
+            TokenKind::Underscore => {
+                self.advance_token()?;
+                Ok(Box::new(Pattern {
+                    pos,
+                    decl: PatternDecl::Pass,
+                }))
+            }
             TokenKind::LitInt { .. } => self.plit_int(),
             TokenKind::LitFloat(_) => self.plit_float(),
             TokenKind::String(_) => self.plit_str(),
             TokenKind::Identifier(_) => self.pident(),
             TokenKind::LBracket => self.parray(),
             TokenKind::LBrace => self.precord(),
+
             TokenKind::DotDot => {
                 let pos = self.advance_token()?.position;
                 Ok(Pattern {

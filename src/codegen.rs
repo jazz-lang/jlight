@@ -193,7 +193,7 @@ impl Context {
             }
             Access::Stack(name, l) => {
                 if self.immutable.contains(&name) {
-                    return Err(MsgWithPos::new(p, Msg::AssignmentToConst));
+                    return Err(MsgWithPos::new(p, Msg::LetReassigned));
                 }
                 //let l = self.new_reg();
                 self.write(Instruction::Move(l as _, r));
@@ -682,7 +682,7 @@ impl Context {
         pat: &Box<Pattern>,
         mutable: bool,
         r: u16,
-    ) -> Result<u16, MsgWithPos> {
+    ) -> Result<(), MsgWithPos> {
         match &pat.decl {
             PatternDecl::Array(patterns) => {
                 for (i, pat) in patterns.iter().enumerate() {
@@ -702,7 +702,7 @@ impl Context {
                 let loc = self.new_reg();
                 self.write(Instruction::Move(loc, r));
                 self.locals.insert(name.to_owned(), loc as _);
-                return Ok(loc);
+                return Ok(());
             }
             PatternDecl::Record(fields) => {
                 for (name, p) in fields.iter() {
@@ -720,6 +720,7 @@ impl Context {
                     self.locals.insert(name.to_owned(), loc as _);
                 }
             }
+            PatternDecl::Pass => (),
             _ => {
                 return Err(MsgWithPos::new(
                     pos,
@@ -729,11 +730,69 @@ impl Context {
                 ))
             }
         }
-        Ok(r)
+        Ok(())
     }
+
+    pub fn compile_arg(&mut self, p: Position, arg: &Arg) -> Result<(), MsgWithPos> {
+        match arg {
+            Arg::Ident(mutable, name) => {
+                if self.locals.contains_key(name) {
+                    return Err(MsgWithPos::new(
+                        p,
+                        Msg::Custom(format!("argument '{}' already defined", name)),
+                    ));
+                }
+                if !*mutable {
+                    self.immutable.insert(name.clone());
+                }
+
+                let r = self.new_reg();
+                self.write(Instruction::Pop(r));
+                self.locals.insert(name.to_owned(), r as _);
+                Ok(())
+            }
+            Arg::Record(rec) => {
+                let obj = self.new_reg();
+                self.write(Instruction::Pop(obj));
+                for item in rec {
+                    if self.locals.contains_key(item) {
+                        return Err(MsgWithPos::new(
+                            p,
+                            Msg::Custom(format!("argument '{}' already defined", item)),
+                        ));
+                    }
+
+                    let field = self.new_reg();
+                    let (id, _) = self.global(&Global::Str(item.to_owned()));
+                    self.write(Instruction::LoadById(field, obj, id as _));
+                    self.locals.insert(item.to_owned(), field as _);
+                }
+                Ok(())
+            }
+            Arg::Array(arr) => {
+                let obj = self.new_reg();
+                self.write(Instruction::Pop(obj));
+                for (i, item) in arr.iter().enumerate() {
+                    if self.locals.contains_key(item) {
+                        return Err(MsgWithPos::new(
+                            p,
+                            Msg::Custom(format!("argument '{}' already defined", item)),
+                        ));
+                    }
+                    let field = self.new_reg();
+                    let id = self.new_reg();
+                    self.write(Instruction::LoadInt(id, i as i32));
+                    self.write(Instruction::LoadByValue(field, obj, id));
+                    self.locals.insert(item.to_owned(), field as _);
+                }
+                Ok(())
+            }
+        }
+    }
+
     pub fn compile_function(
         &mut self,
-        params: &[String],
+        params: &[Arg],
         e: &Box<Expr>,
         vname: Option<String>,
     ) -> Result<u16, MsgWithPos> {
@@ -760,10 +819,7 @@ impl Context {
             regs: 33,
         };
         for p in params.iter().rev() {
-            ctx.stack += 1;
-            let r = ctx.new_reg();
-            ctx.write(Instruction::Pop(r));
-            ctx.locals.insert(p.to_owned(), r as _);
+            ctx.compile_arg(e.pos, p)?;
         }
         if vname.is_some() {
             self.global(&Global::Str(vname.as_ref().unwrap().to_owned()));

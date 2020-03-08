@@ -49,7 +49,13 @@ fn main() {
     let no_std = std::env::var("NO_STD_BUILD").is_ok();
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
-    p.parse().unwrap();
+    match p.parse() {
+        Ok(_) => (),
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    }
     let m = compile(ast, no_std || opt.no_std);
     let mut m = if let Ok(c) = m {
         c
