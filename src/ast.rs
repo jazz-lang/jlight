@@ -24,7 +24,7 @@ pub enum PatternDecl {
     ConstFloat(f64),
     ConstChar(char),
     ConstStr(String),
-    Record(Vec<(String, Box<Pattern>)>),
+    Record(Vec<(String, Option<Box<Pattern>>)>),
     Array(Vec<Box<Pattern>>),
     Rest,
 }
@@ -60,6 +60,7 @@ pub enum ExprKind {
     ConstFloat(f64),
     Object(Vec<(Box<Expr>, Box<Expr>)>),
     Var(bool, String, Option<Box<Expr>>),
+    Let(bool, Box<Pattern>, Box<Expr>),
     While(Box<Expr>, Box<Expr>),
     Block(Vec<Box<Expr>>),
     Return(Option<Box<Expr>>),

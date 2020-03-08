@@ -50,12 +50,18 @@ fn main() {
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();
     let mut p = Parser::new(r, &mut ast);
     p.parse().unwrap();
-    let mut m = compile(ast, no_std || opt.no_std).unwrap();
+    let m = compile(ast, no_std || opt.no_std);
+    let mut m = if let Ok(c) = m {
+        c
+    } else {
+        eprintln!("{}", m.err().unwrap());
+        std::process::exit(1);
+    };
     m.finalize(false, "main".to_owned());
     let mut module = module_from_ctx(&m);
     println!("before optimizations: ");
     disassemble_module(&module);
-    prelink_module(&module,OptLevel::Fast);
+    prelink_module(&module, OptLevel::Fast);
     println!("after:");
     disassemble_module(&module);
     let mut writer = BytecodeWriter { bytecode: vec![] };

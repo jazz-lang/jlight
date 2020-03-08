@@ -130,11 +130,13 @@ pub enum Msg {
     MakeIteratorReturnType(String),
     UnknownStructField(String, String),
     StructFieldNotInitialized(String, String),
+    Custom(String),
 }
 
 impl Msg {
     pub fn message(&self) -> String {
         match *self {
+            Custom(ref msg) => format!("{}", msg),
             Unimplemented => format!("feature not implemented yet."),
             UnknownClass(ref name) => format!("class `{}` does not exist.", name),
             UnknownType(ref name) => format!("type `{}` does not exist.", name),

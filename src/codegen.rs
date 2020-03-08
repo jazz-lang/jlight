@@ -16,6 +16,7 @@
 */
 use crate::ast::*;
 use crate::msg::*;
+use crate::token::Position;
 use basicblock::*;
 use cell::*;
 use hashlink::{LinkedHashMap, LinkedHashSet};
@@ -184,7 +185,7 @@ impl Context {
     pub fn write(&mut self, ins: Instruction) {
         self.get_current_bb().instructions.push(ins);
     }
-    pub fn access_set(&mut self, acc: Access, r: u16) -> Result<u16,MsgWithPos> {
+    pub fn access_set(&mut self, p: Position, acc: Access, r: u16) -> Result<u16, MsgWithPos> {
         match acc {
             Access::Env(n) => {
                 self.write(Instruction::StoreUpvalue(r, n as _));
@@ -192,11 +193,11 @@ impl Context {
             }
             Access::Stack(name, l) => {
                 if self.immutable.contains(&name) {
-                    panic!("immutable");
+                    return Err(MsgWithPos::new(p, Msg::AssignmentToConst));
                 }
-                let l = self.new_reg();
+                //let l = self.new_reg();
                 self.write(Instruction::Move(l as _, r));
-                self.locals.insert(name, l as _);
+                //self.locals.insert(name, l as _);
                 return Ok(l as _);
             }
             Access::Global(_, _, _) => unimplemented!(),
@@ -219,7 +220,7 @@ impl Context {
             _ => unimplemented!(),
         }
     }
-    pub fn access_get(&mut self, acc: Access) -> Result<u16,MsgWithPos> {
+    pub fn access_get(&mut self, acc: Access) -> Result<u16, MsgWithPos> {
         let r = self.new_reg();
         match acc {
             Access::Env(i) => {
@@ -289,7 +290,13 @@ impl Context {
             _ => unimplemented!(),
         }
     }
-    pub fn compile_binop(&mut self, op: &str, e1: &Expr, e2: &Expr, tail: bool) -> Result<u16,MsgWithPos> {
+    pub fn compile_binop(
+        &mut self,
+        op: &str,
+        e1: &Expr,
+        e2: &Expr,
+        tail: bool,
+    ) -> Result<u16, MsgWithPos> {
         match op {
             "==" => {
                 let r1 = self.compile(e1, tail)?;
@@ -365,7 +372,7 @@ impl Context {
         }
     }
 
-    pub fn compile(&mut self, e: &Expr, tail: bool) -> Result<u16,MsgWithPos> {
+    pub fn compile(&mut self, e: &Expr, tail: bool) -> Result<u16, MsgWithPos> {
         match &e.expr {
             ExprKind::Throw(e) => {
                 let r = self.compile(e, tail)?;
@@ -378,7 +385,7 @@ impl Context {
                     self.write(Instruction::LoadNull(r));
                     return Ok(r);
                 }
-                let last = self.scoped::<Result<Option<u16>,MsgWithPos>,_>(|ctx| {
+                let last = self.scoped::<Result<Option<u16>, MsgWithPos>, _>(|ctx| {
                     let expr_next_bb = ctx.current_bb + 1;
                     ctx.write(Instruction::Branch(expr_next_bb as _));
                     ctx.move_forward();
@@ -405,8 +412,8 @@ impl Context {
             ExprKind::ConstInt(x) => {
                 let r = self.new_reg();
                 if *x >= std::i32::MAX as i64 {
-                    self.write(Instruction::LoadNumber(r,f64::to_bits(*x as f64)));
-                    return Ok(r)
+                    self.write(Instruction::LoadNumber(r, f64::to_bits(*x as f64)));
+                    return Ok(r);
                 }
                 self.write(Instruction::LoadInt(r, *x as i32));
                 Ok(r)
@@ -435,7 +442,11 @@ impl Context {
                     Ok(0)
                 }
             },
-
+            ExprKind::Let(mutable, pat, expr) => {
+                let r = self.compile(expr, tail)?;
+                self.compile_var_pattern(pat.pos, pat, *mutable, r)?;
+                Ok(r)
+            }
             ExprKind::Var(mutable, name, init) => {
                 let r = match init {
                     Some(val) => {
@@ -460,7 +471,7 @@ impl Context {
             ExprKind::Assign(lhs, rhs) => {
                 let a = self.compile_access(&lhs.expr);
                 let r = self.compile(rhs, false)?;
-                self.access_set(a, r)
+                self.access_set(lhs.pos, a, r)
             }
             ExprKind::If(cond, if_true, if_false) => {
                 let before_bb_id = self.current_bb;
@@ -497,7 +508,7 @@ impl Context {
                         else_begin as _,
                     ));
                 let last = self.compile(if_true, tail)?;
-                self.write(Instruction::Move(ret,last));
+                self.write(Instruction::Move(ret, last));
                 self.write(Instruction::Branch(terminator_bb_id as _));
                 self.move_forward();
                 let end_bb_id = self.current_bb;
@@ -505,7 +516,6 @@ impl Context {
                     .instructions
                     .push(Instruction::Branch(end_bb_id as _));
                 Ok(ret)
-
             }
             ExprKind::Ident(s) => {
                 let s: &str = s;
@@ -562,7 +572,7 @@ impl Context {
             },
 
             ExprKind::While(cond, block) => {
-                let r = self.scoped::<Result<u16,MsgWithPos>,_>(|fb| {
+                let r = self.scoped::<Result<u16, MsgWithPos>, _>(|fb| {
                     let expr_check_bb_id = fb.current_bb as u16 + 1;
                     fb.write(Instruction::Branch(expr_check_bb_id));
                     fb.move_forward();
@@ -666,12 +676,67 @@ impl Context {
         }
     }
 
+    pub fn compile_var_pattern(
+        &mut self,
+        pos: Position,
+        pat: &Box<Pattern>,
+        mutable: bool,
+        r: u16,
+    ) -> Result<u16, MsgWithPos> {
+        match &pat.decl {
+            PatternDecl::Array(patterns) => {
+                for (i, pat) in patterns.iter().enumerate() {
+                    let nr = self.new_reg();
+                    self.write(Instruction::LoadInt(nr, i as i32));
+                    let val = self.new_reg();
+                    self.write(Instruction::LoadByValue(val, r, nr));
+                    self.compile_var_pattern(pat.pos, pat, mutable, val)?;
+                }
+            }
+            PatternDecl::Ident(name) => {
+                if !mutable {
+                    self.immutable.insert(name.clone());
+                } else if self.immutable.contains(name) && mutable {
+                    self.immutable.remove(name);
+                }
+                let loc = self.new_reg();
+                self.write(Instruction::Move(loc, r));
+                self.locals.insert(name.to_owned(), loc as _);
+                return Ok(loc);
+            }
+            PatternDecl::Record(fields) => {
+                for (name, p) in fields.iter() {
+                    if let Some(pat) = p {
+                        return Err(MsgWithPos::new(
+                            pat.pos,
+                            Msg::Custom("unexpected pattern in variable declaration".to_owned()),
+                        ));
+                    }
+                    if !mutable {
+                        self.immutable.insert(name.clone());
+                    }
+                    let loc = self.new_reg();
+                    self.write(Instruction::Move(loc, r));
+                    self.locals.insert(name.to_owned(), loc as _);
+                }
+            }
+            _ => {
+                return Err(MsgWithPos::new(
+                    pos,
+                    Msg::Custom(
+                        "record,array or ident pattern expected in variable declaration".to_owned(),
+                    ),
+                ))
+            }
+        }
+        Ok(r)
+    }
     pub fn compile_function(
         &mut self,
         params: &[String],
         e: &Box<Expr>,
         vname: Option<String>,
-    ) -> Result<u16,MsgWithPos> {
+    ) -> Result<u16, MsgWithPos> {
         let mut ctx = Context {
             immutable: LinkedHashSet::new(),
             g: self.g.clone(),
@@ -822,11 +887,10 @@ impl Context {
         }
     }
 
-    pub fn finalize(&mut self, _tail: bool, _name: String) {
-    }
+    pub fn finalize(&mut self, _tail: bool, _name: String) {}
 }
 
-pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Result<Context,MsgWithPos> {
+pub fn compile(ast: Vec<Box<Expr>>, no_std: bool) -> Result<Context, MsgWithPos> {
     let mut ctx = Context::new();
     let ast = Box::new(Expr {
         pos: crate::token::Position::new(0, 0),

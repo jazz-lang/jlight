@@ -1,3 +1,20 @@
+/*
+*   Copyright (c) 2020 Adel Prokurov
+*   All rights reserved.
+
+*   Licensed under the Apache License, Version 2.0 (the "License");
+*   you may not use this file except in compliance with the License.
+*   You may obtain a copy of the License at
+
+*   http://www.apache.org/licenses/LICENSE-2.0
+
+*   Unless required by applicable law or agreed to in writing, software
+*   distributed under the License is distributed on an "AS IS" BASIS,
+*   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+*   See the License for the specific language governing permissions and
+*   limitations under the License.
+*/
+
 use crate::ast::*;
 use crate::lexer::*;
 use crate::msg::*;
@@ -99,15 +116,10 @@ impl<'a> Parser<'a> {
         let reassignable = self.token.is(TokenKind::Var);
 
         let pos = self.advance_token()?.position;
-        let ident = self.expect_identifier()?;
-        let expr = if self.token.is(TokenKind::Eq) {
-            self.expect_token(TokenKind::Eq)?;
-            let expr = self.parse_expression()?;
-            Some(expr)
-        } else {
-            None
-        };
-        Ok(expr!(ExprKind::Var(reassignable, ident, expr), pos))
+        let pat = self.parse_pattern()?;
+        self.expect_token(TokenKind::Eq)?;
+        let expr = self.parse_expression()?;
+        Ok(expr!(ExprKind::Let(reassignable, pat, expr), pos))
     }
 
     fn parse_return(&mut self) -> EResult {
@@ -575,8 +587,13 @@ impl<'a> Parser<'a> {
         let pos = self.expect_token(TokenKind::LBrace)?.position;
         let record = self.parse_comma_list(TokenKind::LBracket, |parser| {
             let name = parser.expect_identifier()?;
-            parser.expect_token(TokenKind::Colon)?;
-            let pattern = parser.parse_pattern()?;
+            let pattern = if parser.token.is(TokenKind::Colon) {
+                parser.expect_token(TokenKind::Colon)?;
+                let pattern = parser.parse_pattern()?;
+                Some(pattern)
+            } else {
+                None
+            };
             Ok((name, pattern))
         })?;
 

@@ -1,0 +1,26 @@
+function compose(f,g) {
+    |value| g(f(value))
+}
+
+function curry(arity,fn) {
+    function curried(oldArgs) {
+        var arity = arity
+        var fn = fn
+        function curried_internal() {
+            
+            var allArgs = oldArgs.concat(Function.arguments())
+            var argCount = allArgs.length()
+            if argCount < arity {
+                return curried(allArgs)
+            } else {
+                return fn.apply(0,allArgs)
+            }
+        }
+        curried_internal
+    }
+    curried(new Array())
+}
+
+var module = Module.exports()
+module.compose = compose
+module.curry = curry 
