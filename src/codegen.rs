@@ -31,6 +31,7 @@ use value::*;
 use waffle::bytecode::*;
 use waffle::runtime;
 use waffle::util::arc::Arc;
+use waffle::util::ptr::DerefPointer;
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub enum Global {
     Var(String),
@@ -68,7 +69,6 @@ pub struct Context {
     pub current_bb: usize,
     pub immutable: LinkedHashSet<String>,
     pub locals: LinkedHashMap<String, i32>,
-    pub env: LinkedHashMap<String, i32>,
     pub labels: HashMap<String, Option<u32>>,
     loop_control_info: Vec<LoopControlInfo>,
     pub stack: i32,
@@ -79,6 +79,7 @@ pub struct Context {
     pub cur_pos: (i32, i32),
     pub cur_file: String,
     pub regs: u16,
+    pub parent: Option<DerefPointer<Context>>,
 }
 
 impl Context {
@@ -262,22 +263,48 @@ impl Context {
             _ => unimplemented!(),
         }
     }
+
+    pub fn access_env(&mut self, name: &str) -> Option<Access> {
+        let mut current = self.parent;
+        let mut prev = vec![DerefPointer::new(self)];
+        while let Some(mut ctx) = current {
+            let ctx: &mut Context = &mut *ctx;
+            if ctx.locals.contains_key(name) {
+                let mut last_pos = 0;
+                let _l = ctx.locals.get(name).unwrap().clone();
+                for prev in prev.iter_mut().rev() {
+                    let pos: i32 = if !prev.used_upvars.contains_key(name) {
+                        let pos = prev.used_upvars.len();
+                        prev.used_upvars.insert(name.to_owned(), pos as _);
+                        prev.nenv += 1;
+                        pos as i32
+                    } else {
+                        *prev.used_upvars.get(name).unwrap()
+                    };
+                    last_pos = pos
+                }
+                return Some(Access::Env(last_pos as _));
+            }
+            current = ctx.parent;
+            prev.push(DerefPointer::new(ctx));
+        }
+
+        None
+    }
     pub fn compile_access(&mut self, e: &ExprKind) -> Access {
         match e {
             ExprKind::Ident(name) => {
                 let l = self.locals.get(name);
-                let s: &str = name;
                 if l.is_some() {
                     let l = *l.unwrap();
                     return Access::Stack(name.to_owned(), l);
-                } else if self.env.contains_key(s) {
-                    let l = self.env.get(s);
-                    self.used_upvars.insert(s.to_owned(), *l.unwrap());
-                    self.nenv += 1;
-                    return Access::Env(*l.unwrap());
                 } else {
-                    let (g, n) = self.global(&Global::Var(name.to_owned()));
-                    return Access::Global(g, n, name.to_owned());
+                    if let Some(acc) = self.access_env(name) {
+                        return acc;
+                    } else {
+                        let (g, n) = self.global(&Global::Var(name.to_owned()));
+                        return Access::Global(g, n, name.to_owned());
+                    }
                 }
             }
             ExprKind::Access(e, f) => {
@@ -495,6 +522,12 @@ impl Context {
                 }
             },
             ExprKind::Let(mutable, pat, expr) => {
+                if let ExprKind::Function(None, params, body) = &expr.expr {
+                    if let PatternDecl::Ident(name) = &pat.decl {
+                        let r = self.compile_function(params, body, Some(name.to_owned()))?;
+                        return Ok(r);
+                    }
+                }
                 let r = self.compile(expr, tail)?;
                 self.compile_var_pattern(pat.pos, pat, *mutable, r)?;
                 Ok(r)
@@ -570,7 +603,7 @@ impl Context {
                 Ok(ret)
             }
             ExprKind::Ident(s) => {
-                let s: &str = s;
+                /*let s: &str = s;
                 if self.locals.contains_key(s) {
                     let i = *self.locals.get(s).unwrap();
                     let r = i as u16;
@@ -603,7 +636,8 @@ impl Context {
                         r2
                     };
                     return Ok(r);
-                }
+                }*/
+                Ok(self.ident(s))
             }
             ExprKind::Function(name, params, body) => {
                 let r = self.compile_function(params, body, name.clone())?;
@@ -1042,13 +1076,13 @@ impl Context {
             locals: LinkedHashMap::new(),
             labels: self.labels.clone(),
             nenv: 0,
-            env: self.locals.clone(),
             current_bb: 0,
             used_upvars: LinkedHashMap::new(),
             loop_control_info: vec![],
             cur_pos: (0, 0),
             cur_file: String::new(),
             regs: 33,
+            parent: Some(DerefPointer::new(self)),
         };
         for p in params.iter().rev() {
             ctx.compile_arg(e.pos, p)?;
@@ -1071,8 +1105,8 @@ impl Context {
         if r != 0 {
             ctx.write(Instruction::Return(Some(r)));
         } else {
-            let r = self.new_reg();
-            self.write(Instruction::LoadNull(r));
+            let r = ctx.new_reg();
+            ctx.write(Instruction::LoadNull(r));
             ctx.write(Instruction::Return(Some(r)));
         }
         //jlight_vm::runtime::fusion::optimizer::simplify_cfg(&mut ctx.bbs);
@@ -1116,20 +1150,12 @@ impl Context {
             let i = *self.locals.get(s).unwrap();
             let r = i as u16;
             return r;
-        } else if self.env.contains_key(s) {
-            self.nenv += 1;
-            let r = self.new_reg();
-            let pos = if !self.used_upvars.contains_key(s) {
-                let pos = self.used_upvars.len();
-
-                self.used_upvars.insert(s.to_owned(), pos as _);
-                pos as u16
-            } else {
-                *self.used_upvars.get(s).unwrap() as u16
-            };
-            self.write(Instruction::LoadUpvalue(r, pos as _));
-            return r;
         } else {
+            if let Some(Access::Env(pos)) = self.access_env(name) {
+                let r = self.new_reg();
+                self.write(Instruction::LoadUpvalue(r, pos as _));
+                return r;
+            }
             let (g, n) = self.global2(&Global::Var(s.to_owned()));
             let r = if !n {
                 let r = self.new_reg();
@@ -1168,10 +1194,10 @@ impl Context {
             loop_control_info: vec![],
             cur_pos: (0, 0),
             cur_file: String::new(),
-            env: LinkedHashMap::new(),
             pos: vec![],
             regs: 33,
             stack: 0,
+            parent: None,
         }
     }
 
