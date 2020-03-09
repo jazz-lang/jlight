@@ -44,7 +44,7 @@ struct Opt {
 
 fn main() {
     let opt: Opt = Opt::from_args();
-    simple_logger::init().unwrap();
+    //simple_logger::init().unwrap();
     let mut ast = vec![];
     let no_std = std::env::var("NO_STD_BUILD").is_ok();
     let r = Reader::from_file(opt.input.to_str().unwrap()).unwrap();

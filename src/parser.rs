@@ -404,12 +404,14 @@ impl<'a> Parser<'a> {
         self.expect_token(TokenKind::LBrace)?;
         let list = self.parse_comma_list(TokenKind::RBrace, |parser: &mut Parser| {
             let pat = parser.parse_pattern()?;
-            let when_clause = if parser.token.is(TokenKind::When) {
+            let when_clause = if parser.token.is(TokenKind::When) || parser.token.is(TokenKind::Or)
+            {
                 parser.advance_token()?;
                 Some(parser.parse_expression()?)
             } else {
                 None
             };
+            parser.expect_token(TokenKind::Arrow)?;
             let expr = parser.parse_expression()?;
             Ok((pat, when_clause, expr))
         })?;
@@ -618,15 +620,10 @@ impl<'a> Parser<'a> {
 
     fn precord(&mut self) -> Result<Box<Pattern>, MsgWithPos> {
         let pos = self.expect_token(TokenKind::LBrace)?.position;
-        let record = self.parse_comma_list(TokenKind::LBracket, |parser| {
+        let record = self.parse_comma_list(TokenKind::RBrace, |parser| {
             let name = parser.expect_identifier()?;
-            let pattern = if parser.token.is(TokenKind::Colon) {
-                parser.expect_token(TokenKind::Colon)?;
-                let pattern = parser.parse_pattern()?;
-                Some(pattern)
-            } else {
-                None
-            };
+            parser.expect_token(TokenKind::Colon)?;
+            let pattern = Some(parser.parse_pattern()?);
             Ok((name, pattern))
         })?;
 

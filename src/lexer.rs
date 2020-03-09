@@ -297,6 +297,9 @@ impl Lexer {
                 if nch == '=' {
                     self.read_char();
                     TokenKind::EqEq
+                //} else if nch == '>' {
+                //  self.read_char();
+                //TokenKind::Arrow
                 } else {
                     TokenKind::Eq
                 }

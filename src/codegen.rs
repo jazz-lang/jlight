@@ -290,6 +290,7 @@ impl Context {
             _ => unimplemented!(),
         }
     }
+
     pub fn compile_binop(
         &mut self,
         op: &str,
@@ -368,6 +369,54 @@ impl Context {
                 self.write(Instruction::Binary(BinOp::Mul, r3, r1, r2));
                 Ok(r3)
             }
+            "&&" => {
+                let p = e1.pos;
+                self.compile(
+                    &Expr {
+                        pos: p,
+                        expr: ExprKind::If(
+                            Box::new(e1.clone()),
+                            /*Box::new(Expr {
+                                pos: p,
+                                expr: ExprKind::If(
+                                    Box::new(e2.clone()),
+                                    Box::new(Expr {
+                                        pos: p,
+                                        expr: ExprKind::ConstBool(true),
+                                    }),
+                                    Some(Box::new(Expr {
+                                        pos: p,
+                                        expr: ExprKind::ConstBool(false),
+                                    })),
+                                ),
+                            }),*/
+                            Box::new(e2.clone()),
+                            Some(Box::new(Expr {
+                                pos: p,
+                                expr: ExprKind::ConstBool(false),
+                            })),
+                        ),
+                    },
+                    false,
+                )
+            }
+            "||" => {
+                let pos = e1.pos;
+                self.compile(
+                    &Expr {
+                        pos,
+                        expr: ExprKind::If(
+                            Box::new(e1.clone()),
+                            Box::new(Expr {
+                                pos,
+                                expr: ExprKind::ConstBool(true),
+                            }),
+                            Some(Box::new(e2.clone())),
+                        ),
+                    },
+                    false,
+                )
+            }
             _ => unimplemented!(),
         }
     }
@@ -382,7 +431,10 @@ impl Context {
             ExprKind::Block(v) => {
                 if v.is_empty() {
                     let r = self.new_reg();
+                    let expr_next_bb = self.current_bb + 1;
                     self.write(Instruction::LoadNull(r));
+                    self.write(Instruction::Branch(expr_next_bb as _));
+                    self.move_forward();
                     return Ok(r);
                 }
                 let last = self.scoped::<Result<Option<u16>, MsgWithPos>, _>(|ctx| {
@@ -609,6 +661,7 @@ impl Context {
                     fb.bbs[end2_bb_id as usize]
                         .instructions
                         .push(Instruction::Branch(next));
+                    fb.write(Instruction::GcSafepoint);
                     Ok(last)
                 })?;
                 Ok(r)
@@ -672,10 +725,189 @@ impl Context {
                 }
                 Ok(r)
             }
+            ExprKind::Match(e2, patterns) => self.compile_match(e.pos, e2, patterns),
             expr => panic!("{:?}", expr),
         }
     }
+    pub fn compile_match(
+        &mut self,
+        _: Position,
+        e: &Box<Expr>,
+        patterns: &[(Box<Pattern>, Option<Box<Expr>>, Box<Expr>)],
+    ) -> Result<u16, MsgWithPos> {
+        let value = self.compile(e, false)?;
+        let mut to_terminate = vec![];
 
+        for (pattern, when, body) in patterns.iter() {
+            let tmp = self.locals.clone();
+            let r = self.compile_pattern(pattern.pos, pattern, value)?;
+            let first = self.current_bb;
+            let first_r = r;
+            //self.write(Instruction::BranchIfFalse(r, 0));
+            self.move_forward();
+            let first_next = self.current_bb;
+            let second = self.current_bb;
+            let mut second_r = None;
+            let mut second_b = None;
+            if let Some(when) = when {
+                let r = self.compile(when, false)?;
+                second_r = Some(r);
+                //self.write(Instruction::BranchIfFalse(r, 0));
+                self.move_forward();
+                second_b = Some(self.current_bb);
+            }
+            let r = self.compile(body, false)?;
+            self.write(Instruction::Move(0, r));
+            to_terminate.push(self.current_bb);
+            self.move_forward();
+            let terminator_id = self.current_bb;
+            self.bbs[first]
+                .instructions
+                .push(Instruction::ConditionalBranch(
+                    first_r,
+                    first_next as _,
+                    terminator_id as _,
+                ));
+            if let Some(second_r) = second_r {
+                self.bbs[second]
+                    .instructions
+                    .push(Instruction::ConditionalBranch(
+                        second_r,
+                        second_b.unwrap() as u16,
+                        terminator_id as _,
+                    ));
+            }
+            self.locals = tmp;
+        }
+        //self.move_forward();
+        let id = self.current_bb;
+        for bb in to_terminate.iter() {
+            self.bbs[*bb]
+                .instructions
+                .push(Instruction::Branch(id as _));
+        }
+        let r = self.new_reg();
+        self.write(Instruction::Move(r, 0));
+        Ok(0)
+    }
+
+    fn compile_pattern(
+        &mut self,
+        _p: Position,
+        pat: &Pattern,
+        val: u16,
+    ) -> Result<u16, MsgWithPos> {
+        match &pat.decl {
+            PatternDecl::ConstChar(c) => {
+                let r = self.new_reg();
+                let (gid, _) = self.global(&Global::Str(c.to_string()));
+                let r2 = self.new_reg();
+                self.write(Instruction::LoadConst(r, gid as _));
+                self.write(Instruction::Binary(BinOp::Equal, r2, r, val));
+                Ok(r2)
+            }
+            PatternDecl::ConstFloat(f) => {
+                let r = self.new_reg();
+                let r2 = self.new_reg();
+                self.write(Instruction::LoadNumber(r, f.to_bits()));
+                self.write(Instruction::Binary(BinOp::Equal, r2, r, val));
+                Ok(r2)
+            }
+            PatternDecl::ConstInt(f) => {
+                let r = self.new_reg();
+                let r2 = self.new_reg();
+                if *f < std::i32::MAX as i64 {
+                    self.write(Instruction::LoadInt(r, *f as i32));
+                } else {
+                    self.write(Instruction::LoadNumber(r, (*f as f64).to_bits()))
+                }
+                self.write(Instruction::Binary(BinOp::Equal, r2, r, val));
+                Ok(r2)
+            }
+            PatternDecl::ConstStr(s) => {
+                let r = self.new_reg();
+                let r2 = self.new_reg();
+                let (gid, _) = self.global(&Global::Str(s.to_owned()));
+                self.write(Instruction::LoadConst(r, gid as _));
+                self.write(Instruction::Binary(BinOp::Equal, r2, r, val));
+                Ok(r2)
+            }
+            PatternDecl::Ident(name) => {
+                self.immutable.insert(name.to_owned());
+                let r = self.new_reg();
+                self.write(Instruction::Move(r, val));
+                self.locals.insert(name.to_owned(), r as _);
+                let r2 = self.new_reg();
+                self.write(Instruction::LoadTrue(r2));
+                Ok(r2)
+            }
+            PatternDecl::Record(fields) => {
+                let mut branches = vec![];
+                for (name, pat) in fields.iter() {
+                    let r = self.new_reg();
+                    let (gid, _) = self.global(&Global::Str(name.to_owned()));
+                    self.write(Instruction::LoadById(r, val, gid as _));
+                    if let Some(pat) = pat {
+                        let r = self.compile_pattern(pat.pos, pat, r)?;
+                        self.write(Instruction::Move(0, r));
+                        branches.push((self.current_bb, self.current_bb + 1));
+                    } else {
+                        self.write(Instruction::LoadTrue(0));
+                    }
+                    self.move_forward();
+                    //self.immutable.insert(name.to_owned());
+                    //self.locals.insert(name.to_owned(), r as _);
+                }
+                let terminator_bb_id = self.current_bb;
+                for (branch, next) in branches {
+                    self.bbs[branch]
+                        .instructions
+                        .push(Instruction::ConditionalBranch(
+                            0,
+                            next as _,
+                            terminator_bb_id as _,
+                        ));
+                }
+                let r = self.new_reg();
+                self.write(Instruction::Move(r, 0));
+                Ok(r)
+            }
+            PatternDecl::Array(patterns) => {
+                let mut branches = vec![];
+                for (i, pat) in patterns.iter().enumerate() {
+                    let r = self.new_reg();
+                    let r2 = self.new_reg();
+                    self.write(Instruction::LoadInt(r2, i as i32));
+                    self.write(Instruction::LoadByValue(r, val, r2));
+                    let r = self.compile_pattern(pat.pos, pat, r)?;
+                    self.write(Instruction::Move(0, r));
+                    branches.push((self.current_bb, self.current_bb + 1));
+                    self.move_forward();
+                }
+                let terminator_bb_id = self.current_bb;
+                for (branch, next) in branches {
+                    self.bbs[branch]
+                        .instructions
+                        .push(Instruction::ConditionalBranch(
+                            0,
+                            next as _,
+                            terminator_bb_id as _,
+                        ));
+                }
+                let r = self.new_reg();
+                self.write(Instruction::Move(r, 0));
+                Ok(r)
+            }
+            PatternDecl::Pass => {
+                self.write(Instruction::Branch(self.current_bb as u16 + 1));
+                self.move_forward();
+                let r = self.new_reg();
+                self.write(Instruction::LoadTrue(r));
+                Ok(r)
+            }
+            _ => unimplemented!(),
+        }
+    }
     pub fn compile_var_pattern(
         &mut self,
         pos: Position,
