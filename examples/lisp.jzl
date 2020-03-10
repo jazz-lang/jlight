@@ -1,0 +1,206 @@
+function tokenize(s) {
+    var s = s.replace("("," ( ").replace(")"," ) ").split(" ")
+    var arr = new Array()
+    s.forEach(|x,i| {
+        
+        if x != ""  {
+            if x != " " {
+                arr.push(x)
+            }
+        }
+    })
+
+
+    return arr
+}
+
+let Map = new Object()
+Map.constructor = function constructor() {
+    var nodes = new Array()
+    this.nodes = nodes
+    return this
+}
+
+Map.insert = function insert(key,elem) {
+    var i = 0
+    while i < this.nodes.length() {
+        let [k,v] = this.nodes[i]
+        if k == key {
+            this.nodes[i][1] = elem
+            return false
+        }
+        i = i + 1
+    }
+    this.nodes.push(new Array(key,elem))
+}
+
+Map.find = function find(key) {
+    var i = 0
+    while i < this.nodes.length() {
+        let [k,v] = this.nodes[i]
+        if k == key {
+            return v
+        }
+        i = i + 1
+    }
+    return nil
+}
+
+Map.contains = function contains(key) {
+    var i = 0
+    while i < this.nodes.length() {
+        let [k,v] = this.nodes[i]
+        if k == key {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+Map.forEach = function forEach(f) {
+    var i = 0
+    while i < this.nodes.length() {
+        let [k,v] = this.nodes[i]
+        f(k,v)
+        i = i + 1
+    }
+    return nil
+}
+
+
+
+let atom = |value| {
+    var x = new Number(value)
+    if isNull(x) {
+        return value
+    } else {
+        return x
+    }
+}
+
+function read_from_tokens(tokens) {
+    if tokens.length() == 0 {
+        throw "Unexpected EOF while reading"
+    }
+
+    let token = tokens.remove(0)
+    if token == "(" {
+        let L = new Array()
+        while tokens[0] != ")" {
+            L.push(read_from_tokens(tokens))
+        }
+        tokens.remove(0)
+        return L
+    } else if token == ")" {
+        throw "Unexpected )"
+    } else {
+        return atom(token)
+    }
+}
+
+let parse = |program| read_from_tokens(tokenize(program))
+
+let Env = new Object()
+Env.constructor = function constructor(params,args,outer) {
+    var m = new Map()
+    this.dict = m
+    
+
+    params.forEach(|elem,index| {
+        m.insert(elem,args[index])
+    })
+    this.outer = outer
+    return this
+}
+
+Env.find = function find(x) {
+    if this.dict.contains(x) {
+        return this.dict
+    } else {
+        if isNull(this.outer) {
+            throw "Not found " + x
+        }
+        return this.outer.find(x)
+    }
+}
+
+let Eval = new Object()
+Eval.procedure = function proc(params,body,env) {
+    var o = new Object()
+    o.params = params
+    o.body = body
+    o.env = env
+    o.apply = function apply(_self,args) {
+        var new_env = new Env(this.params,args,this.env)
+        return Eval.eval(this.body,new_env)
+    }
+    return o
+}
+Eval.eval = function eval(x,env) {
+    if instanceof(x,Array) == false {
+        
+        if instanceof(x,String) {
+            return env.find(x).find(x)
+        }
+        return x
+    }
+    if x.length() == 1 {
+        if instanceof(x[0],Number) {
+            return x[0]
+        }
+        return env.find(x[0]).find(x[0])
+    }
+    if x[0] == "quote" {
+        let [_,exp] = x
+        return exp
+    } else if x[0] == "if" {
+        let [_,test,conseq,alt] = x
+        let exp = if Eval.eval(test,env) {
+            conseq
+        } else {
+            alt
+        }
+        return eval(exp,env)
+    } else if x[0] == "define" {
+        let [_,v,exp] = x
+        env.dict.insert(v,Eval.eval(exp,env))
+    } else if x[0] == "set!" {
+        let [_,v,exp] = x
+        env.find(v).dict.insert(v,Eval.eval(exp,env))
+    } else if x[0] == "lambda" {
+        let [_,params,body] = x
+        return Eval.procedure(params,body,env)
+    } else {
+        let proc = Eval.eval(x[0],env)
+        let args = new Array()
+        var i = 1
+        while i < x.length() {
+            args.push(Eval.eval(x[i],env))
+            i = i + 1
+        } 
+        return proc.apply(0,args)
+    }
+}
+let standard_env = || {
+    var p = new Array()
+   
+    var o = new Env(p,p,nil)
+    o.dict.insert("+",|a,b| a + b)
+    o.dict.insert("-",|a,b| a - b)
+    o.dict.insert("/",|a,b| a / b)
+    o.dict.insert("*",|a,b| a * b)
+    o
+}
+
+Eval.std = standard_env()
+let repl = function repl() {
+    while true {
+        let val = eval(parse(io.readln()),Eval.std)
+        if !isNull(val) {
+            io.writeln(val)
+        }
+    }
+}
+
+repl()

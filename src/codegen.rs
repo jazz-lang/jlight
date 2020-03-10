@@ -444,6 +444,13 @@ impl Context {
                     false,
                 )
             }
+            "%" => {
+                let r1 = self.compile(e1, true)?;
+                let r2 = self.compile(e2, true)?;
+                let r3 = self.new_reg();
+                self.write(Instruction::Binary(BinOp::Mod, r3, r1, r2));
+                Ok(r3)
+            }
             _ => unimplemented!(),
         }
     }
@@ -760,6 +767,11 @@ impl Context {
                 Ok(r)
             }
             ExprKind::Match(e2, patterns) => self.compile_match(e.pos, e2, patterns),
+            ExprKind::Nil => {
+                let r = self.new_reg();
+                self.write(Instruction::LoadNull(r));
+                Ok(r)
+            }
             expr => panic!("{:?}", expr),
         }
     }

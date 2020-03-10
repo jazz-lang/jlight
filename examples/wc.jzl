@@ -1,0 +1,99 @@
+let CONCURRENCY = 8
+let MAIN = Process.current()
+let NEWLINE = 10
+let SINGLE_SPACE = 32
+let SPACE_RANGE = new Array(9,13)
+let CHUNK_SIZE = 64 * 1024
+
+function isSpace(b) {
+    var i = 9
+    while i <= 13 {
+        if b == i {
+            return true
+        }
+        i = i + 1
+    } 
+    return b == SINGLE_SPACE
+}
+function count(ch) {
+    var byte = ch.bytes[ch.index]
+    if isNull(byte) {
+        return new Array(ch.lines,ch.words)
+    }
+
+    if isSpace(byte) {
+        if byte == NEWLINE {
+            ch.lines = ch.lines + 1
+        }
+        ch.prev_is_space = true
+    } else {
+        if ch.prev_is_space {
+            ch.words = ch.words + 1
+            ch.prev_is_space = false
+        }
+    }
+    ch.index = ch.index + 1
+
+    count(ch)
+}
+function workerLoop() {
+    let chunk = Process.recv()
+    Process.send(MAIN,count(chunk))
+    workerLoop()
+}
+
+function Chunk(prev_is_space,bytes) {
+    this.prev_is_space = prev_is_space
+    this.bytes = bytes
+    this.lines = 0
+    this.words = 0
+    this.index = 0
+    return this
+}
+
+
+
+let ARGS = env.arguments()
+if isNull(ARGS[1]) {
+    throw "You must specify a file to process"
+}
+
+let path = "program.wfl"
+let input = File.readOnly(path)
+let workers = new Array()
+var i = 0
+while i <= CONCURRENCY {
+    workers.push(Process.spawn(|| workerLoop()))
+    i = i + 1
+}
+
+var bytes = 0
+var words = 0
+var lines = 0
+var prev_is_space = true
+var jobs = 0
+var buffer = new Array()
+while input.tryReadBytes(buffer,CHUNK_SIZE) > 0 {
+    var ch = new Chunk(prev_is_space,buffer)
+    Process.send(workers[jobs % workers.length()],ch)
+    prev_is_space = isSpace(buffer[buffer.length() - 1])
+    //bytes = bytes + buffer.length()
+    jobs = jobs + 1
+    buffer.clear()
+}
+
+while jobs > 0 {
+    let [first,second] = Process.recv()
+    lines = lines + first
+    words = words + second
+    jobs = jobs - 1
+}
+
+io.writeln(
+    " ",
+    lines,
+    " ",
+    words,
+    " ",
+    path
+)
