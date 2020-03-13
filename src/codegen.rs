@@ -682,7 +682,7 @@ impl Context {
                         },
                         |fb| fb.compile(block, tail),
                     )?;
-
+                    fb.write(Instruction::GcSafepoint);
                     fb.write(Instruction::Branch(expr_check_bb_id));
                     let end_bb_id = fb.current_bb as u16 + 1;
                     fb.move_forward();
@@ -1271,15 +1271,8 @@ pub fn module_from_ctx(context: &Context) -> Arc<Module> {
             upvalues: vec![],
             md: Default::default(),
         });
-        fun.add_attribute_without_barrier(
-            &rt.state,
-            Arc::new("prototype".to_owned()),
-            rt.state.allocate(Cell::with_prototype(
-                CellValue::None,
-                rt.state.object_prototype.as_cell(),
-            )),
-        );
-        m.globals[*gid as usize] = fun;
+
+        m.globals[*gid as usize] = Value::from(fun.as_cell());
     }
 
     for (i, g) in context.g.borrow().table.iter().enumerate() {
@@ -1301,7 +1294,7 @@ pub fn module_from_ctx(context: &Context) -> Arc<Module> {
         upvalues: vec![],
         md: Default::default(),
     });
-    m.globals.push(Value::from(entry));
+    m.globals.push(Value::from(entry.as_cell()));
 
     m
 }

@@ -622,8 +622,12 @@ impl<'a> Parser<'a> {
         let pos = self.expect_token(TokenKind::LBrace)?.position;
         let record = self.parse_comma_list(TokenKind::RBrace, |parser| {
             let name = parser.expect_identifier()?;
-            parser.expect_token(TokenKind::Colon)?;
-            let pattern = Some(parser.parse_pattern()?);
+            let pattern = if parser.token.is(TokenKind::Colon) {
+                parser.expect_token(TokenKind::Colon)?;
+                Some(parser.parse_pattern()?)
+            } else {
+                None
+            };
             Ok((name, pattern))
         })?;
 
