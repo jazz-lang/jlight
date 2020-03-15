@@ -1014,7 +1014,10 @@ impl Context {
                         self.immutable.insert(name.clone());
                     }
                     let loc = self.new_reg();
-                    self.write(Instruction::Move(loc, r));
+                    let field = self.new_reg();
+                    let (id, _) = self.global(&Global::Str(name.to_owned()));
+                    self.write(Instruction::LoadById(field, r, id as _));
+                    self.write(Instruction::Move(loc, field));
                     self.locals.insert(name.to_owned(), loc as _);
                 }
             }
