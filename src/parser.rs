@@ -154,11 +154,11 @@ impl<'a> Parser<'a> {
 
     fn parse_expression(&mut self) -> EResult {
         match self.token.kind {
-            TokenKind::New => {
+            /*TokenKind::New => {
                 let pos = self.advance_token()?.position;
                 let calling = self.parse_expression()?;
                 Ok(expr!(ExprKind::New(calling), pos))
-            }
+            }*/
             TokenKind::Fun => self.parse_function(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Let | TokenKind::Var => self.parse_let(),
@@ -466,6 +466,35 @@ impl<'a> Parser<'a> {
             TokenKind::True => self.parse_bool_literal(),
             TokenKind::False => self.parse_bool_literal(),
             TokenKind::Nil => self.parse_nil(),
+            TokenKind::New => {
+                let pos = self.token.position;
+                self.advance_token()?;
+                if self.token.is(TokenKind::LBrace) {
+                    self.expect_token(TokenKind::LBrace)?;
+                    let list = self.parse_comma_list(TokenKind::RBrace, |p| {
+                        let name = p.expect_identifier()?;
+                        let value = if p.token.is(TokenKind::Colon) {
+                            p.advance_token()?;
+                            Some(p.parse_expression()?)
+                        } else {
+                            None
+                        };
+
+                        Ok((name, value))
+                    });
+                    Ok(expr!(ExprKind::NewObject(list?), pos))
+                } else {
+                    let call = self.parse_expression()?;
+                    if let ExprKind::Call { .. } = call.expr {
+                        Ok(expr!(ExprKind::New(call), pos))
+                    } else {
+                        Err(MsgWithPos::new(
+                            self.token.position,
+                            Msg::Custom("Function call expected".to_owned()),
+                        ))
+                    }
+                }
+            }
             _ => Err(MsgWithPos::new(
                 self.token.position,
                 Msg::ExpectedFactor(self.token.name().clone()),

@@ -79,6 +79,7 @@ pub enum ExprKind {
     Nil,
     Throw(Box<Expr>),
     ConstBool(bool),
+    NewObject(Vec<(String, Option<Box<Expr>>)>),
     Array(Vec<Box<Expr>>),
     ArrayIndex(Box<Expr>, Box<Expr>),
     This,

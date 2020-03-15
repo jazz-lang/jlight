@@ -766,6 +766,26 @@ impl Context {
                 }
                 Ok(r)
             }
+            ExprKind::NewObject(fields) => {
+                let r = self.new_reg();
+                let (id, _) = self.global(&Global::Str("Object".to_owned()));
+                self.write(Instruction::LoadStaticById(r, id as _));
+                let r2 = self.new_reg();
+                self.write(Instruction::New(r2, r, 0));
+                let r = r2;
+
+                for (name, value) in fields.iter() {
+                    let value = if let Some(value) = value {
+                        self.compile(value, tail)?
+                    } else {
+                        self.ident(name)
+                    };
+                    let id = self.global(&Global::Str(name.to_owned()));
+                    self.write(Instruction::StoreById(r, value, id.0 as _));
+                }
+
+                Ok(r)
+            }
             ExprKind::Match(e2, patterns) => self.compile_match(e.pos, e2, patterns),
             ExprKind::Nil => {
                 let r = self.new_reg();
