@@ -21,6 +21,5 @@ function curry(arity,fn) {
     curried(new Array())
 }
 
-var module = Module.exports()
-module.compose = compose
-module.curry = curry 
+Module.exports().compose = compose
+Module.exports().curry = curry
