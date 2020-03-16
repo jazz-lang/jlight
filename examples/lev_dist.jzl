@@ -62,4 +62,4 @@ var s1 = "booooook"
 var s2 = "back"
 let res = lev_dist(s1,s2)
 
-IO.WriteLine(res)
+io.writeln(res)
