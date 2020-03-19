@@ -451,8 +451,28 @@ impl Context {
                 self.write(Instruction::Binary(BinOp::Mod, r3, r1, r2));
                 Ok(r3)
             }
+            "<<" => {
+                let r1 = self.compile(e1, true)?;
+                let r2 = self.compile(e2, true)?;
+                let r3 = self.new_reg();
+                self.write(Instruction::Binary(BinOp::Rsh, r3, r1, r2));
+                Ok(r3)
+            }
+            ">>" => {
+                let r1 = self.compile(e1, true)?;
+                let r2 = self.compile(e2, true)?;
+                let r3 = self.new_reg();
+                self.write(Instruction::Binary(BinOp::Lsh, r3, r1, r2));
+                Ok(r3)
+            }
             _ => unimplemented!(),
         }
+    }
+    pub fn ld_static(&mut self, name: &str) -> u16 {
+        let r = self.new_reg();
+        let (id, _) = self.global(&Global::Str(name.to_owned()));
+        self.write(Instruction::LoadStaticById(r, id as _));
+        r
     }
 
     pub fn compile(&mut self, e: &Expr, tail: bool) -> Result<u16, MsgWithPos> {
@@ -538,6 +558,44 @@ impl Context {
                 let r = self.compile(expr, tail)?;
                 self.compile_var_pattern(pat.pos, pat, *mutable, r)?;
                 Ok(r)
+            }
+            ExprKind::Class(name, prototype, body) => {
+                let object_location = self.new_reg();
+                let object = if let None = prototype {
+                    self.ld_static("Object")
+                } else if let Some(prototype) = prototype {
+                    self.compile(prototype, false)?
+                } else {
+                    unreachable!()
+                };
+                self.write(Instruction::Push(object));
+                self.write(Instruction::New(object_location, object, 1));
+                let mut set = std::collections::HashSet::new();
+                for elem in body.iter() {
+                    let elem_name: String = if let ExprKind::Function(Some(name), ..) = &elem.expr {
+                        name.to_owned()
+                    } else {
+                        return Err(MsgWithPos::new(
+                            elem.pos,
+                            Msg::Custom(format!("class methods must need to be named")),
+                        ));
+                    };
+                    if !set.insert(elem_name.clone()) {
+                        return Err(MsgWithPos::new(
+                            elem.pos,
+                            Msg::Custom(format!("method '{}' already declared", elem_name)),
+                        ));
+                    }
+                    if let ExprKind::Function(Some(name), args, body) = &elem.expr {
+                        let r = self.compile_function(args, body, Some(name.to_owned()))?;
+                        let (id, _) = self.global(&Global::Var(name.to_owned()));
+                        self.write(Instruction::StoreById(object_location, r, id as _));
+                    } else {
+                        unreachable!()
+                    }
+                }
+                self.locals.insert(name.to_owned(), object_location as _);
+                Ok(object_location as u16)
             }
             ExprKind::Var(mutable, name, init) => {
                 let r = match init {
@@ -652,7 +710,7 @@ impl Context {
             }
             ExprKind::New(expr) => match &expr.expr {
                 ExprKind::Call(value, args) => {
-                    for arg in args.iter().rev() {
+                    for arg in args.iter() {
                         let r = self.compile(arg, tail)?;
                         self.write(Instruction::Push(r));
                     }
@@ -715,7 +773,7 @@ impl Context {
                 Ok(r)
             }
             ExprKind::Call(value, args) => {
-                for arg in args.iter().rev() {
+                for arg in args.iter() {
                     let r = self.compile(arg, tail)?;
                     self.write(Instruction::Push(r));
                 }

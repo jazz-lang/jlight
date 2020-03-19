@@ -48,7 +48,6 @@ pub enum TokenKind {
     RQuote,
 
     // Keywords
-    Include,
     Class,
     Implements,
     This,
@@ -103,7 +102,6 @@ pub enum TokenKind {
     Caret,
     And,
     Or,
-    Internal,
 
     Eq,
     EqEq,
@@ -164,7 +162,6 @@ impl TokenKind {
             TokenKind::Underscore => "_",
 
             TokenKind::Import => "import",
-            TokenKind::Include => "include",
             // Operators
             TokenKind::Add => "+",
             TokenKind::Sub => "-",
@@ -191,8 +188,6 @@ impl TokenKind {
             TokenKind::Caret => "^",
             TokenKind::And => "&&",
             TokenKind::Or => "||",
-            TokenKind::Internal => "internal",
-
             TokenKind::Eq => "=",
             TokenKind::EqEq => "==",
             TokenKind::Ne => "!=",

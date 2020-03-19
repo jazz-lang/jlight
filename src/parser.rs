@@ -160,6 +160,7 @@ impl<'a> Parser<'a> {
                 Ok(expr!(ExprKind::New(calling), pos))
             }*/
             TokenKind::Fun => self.parse_function(),
+            TokenKind::Class => self.parse_class(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Let | TokenKind::Var => self.parse_let(),
             TokenKind::LBrace => self.parse_block(),
@@ -381,6 +382,21 @@ impl<'a> Parser<'a> {
         Ok(data)
     }
 
+    fn parse_list<F, R>(&mut self, stop: TokenKind, mut parse: F) -> Result<Vec<R>, MsgWithPos>
+    where
+        F: FnMut(&mut Parser) -> Result<R, MsgWithPos>,
+    {
+        let mut data = vec![];
+
+        while !self.token.is(stop.clone()) && !self.token.is_eof() {
+            let entry = parse(self)?;
+            data.push(entry);
+        }
+
+        self.expect_token(stop)?;
+
+        Ok(data)
+    }
     fn advance_token(&mut self) -> Result<Token, MsgWithPos> {
         let tok = self.lexer.read_token()?;
 
@@ -397,6 +413,36 @@ impl<'a> Parser<'a> {
 
         let block = self.parse_expression()?;
         Ok(expr!(ExprKind::Lambda(params, block), tok.position))
+    }
+    fn parse_class(&mut self) -> EResult {
+        let pos = self.expect_token(TokenKind::Class)?.position;
+        let name = self.expect_identifier()?;
+        let proto = if self.token.is(TokenKind::LParen) {
+            self.advance_token()?;
+            let proto = self.parse_expression()?;
+            self.expect_token(TokenKind::RParen)?;
+            Some(proto)
+        } else {
+            None
+        };
+        self.expect_token(TokenKind::LBrace)?;
+        let body = self.parse_list(TokenKind::RBrace, |p| {
+            let pos = p.token.position;
+            let name = p.token.name().to_owned();
+            let attr = match p.token.kind {
+                TokenKind::Fun => p.parse_function()?,
+
+                _ => return Err(MsgWithPos::new(pos, Msg::ExpectedClassElement(name))),
+            };
+
+            Ok(attr)
+        })?;
+
+        Ok(Expr {
+            pos,
+            expr: ExprKind::Class(name, proto, body),
+        })
+        .map(Box::new)
     }
     fn parse_match(&mut self) -> EResult {
         let pos = self.expect_token(TokenKind::Match)?.position;

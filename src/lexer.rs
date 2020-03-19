@@ -55,11 +55,9 @@ impl Lexer {
             "throw" => TokenKind::Throw,
             "do" => TokenKind::Do,
             "import" => TokenKind::Import,
-            "internal" => TokenKind::Internal,
             "class" => TokenKind::Class,
             "implements" => TokenKind::Implements,
-            "new" => TokenKind::New,
-            "include" => TokenKind::Include
+            "new" => TokenKind::New
         );
 
         Lexer {

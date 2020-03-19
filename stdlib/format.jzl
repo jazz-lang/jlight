@@ -1,0 +1,32 @@
+function format() {
+    var fmt = Function.arguments()[0]
+    var args = Function.arguments()
+    var pos = 1
+    var i = 0
+    var new_string = ""
+    while i < fmt.length() {
+        if fmt.charAt(i) == "{" {
+            if fmt.charAt(i + 1) == "{" {
+                new_string = new_string + "{"
+                i = i + 2
+            } else {
+                if fmt.charAt(i + 1) != "}" {
+                    throw "Unclosed fmt"
+                }
+                if pos >= args.length() {
+                    throw "Argument at " + pos + " does not exist"
+                }
+                new_string = new_string + args[pos]
+                pos = pos + 1
+                
+                i = i + 2
+            }
+        } else {                  
+            new_string = new_string + fmt.charAt(i)
+            i = i + 1
+        }
+    }
+    return new_string
+}
+
+Module.exports().format = format

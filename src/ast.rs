@@ -24,6 +24,9 @@ pub enum PatternDecl {
     ConstFloat(f64),
     ConstChar(char),
     ConstStr(String),
+    Cons(Box<Pattern>, Box<Pattern>),
+    EmptyList,
+    Tuple(Vec<Box<Pattern>>),
     Record(Vec<(String, Option<Box<Pattern>>)>),
     Array(Vec<Box<Pattern>>),
     Pass,
@@ -60,7 +63,6 @@ pub enum ExprKind {
     Access(Box<Expr>, String),
     Ident(String),
     Function(Option<String>, Vec<Arg>, Box<Expr>),
-    Class(String, Box<Expr>, Option<Box<Expr>>),
     Lambda(Vec<Arg>, Box<Expr>),
     Match(Box<Expr>, Vec<(Box<Pattern>, Option<Box<Expr>>, Box<Expr>)>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
@@ -82,6 +84,8 @@ pub enum ExprKind {
     NewObject(Vec<(String, Option<Box<Expr>>)>),
     Array(Vec<Box<Expr>>),
     ArrayIndex(Box<Expr>, Box<Expr>),
+    Class(String, Option<Box<Expr>>, Vec<Box<Expr>>),
+    Tuple(Vec<Box<Expr>>),
     This,
 }
 
